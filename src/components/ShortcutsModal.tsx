@@ -5,7 +5,7 @@ import { Modal } from "@/components/Modal"
 /**
  * A reference card for the shortcuts that actually exist.
  *
- * Every row here is bound somewhere in BoardCanvas or ZoomControl — this is a reference,
+ * Every row here is bound somewhere in BoardCanvas or BottomPill — this is a reference,
  * not a wishlist, and a shortcut listed but not implemented is worse than one that is
  * simply undocumented. When a binding is added or removed, this list is the other half
  * of that change.

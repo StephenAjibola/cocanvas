@@ -84,7 +84,14 @@ import {
   translateObject,
   visualBounds,
 } from "@/lib/objects"
-import { type PlacedShape, isFillable, shapePoints } from "@/lib/shapes"
+import {
+  type PlacedShape,
+  arrowHead,
+  hasInterior,
+  isBlockArrow,
+  isFillable,
+  shapePoints,
+} from "@/lib/shapes"
 import { IMAGE_MAX_SIZE, type ImageObject } from "@/lib/images"
 import {
   CONNECTOR_SIDES,
@@ -125,7 +132,18 @@ import { CanvasPanel } from "@/components/CanvasPanel"
 import { ShareButton } from "@/components/ShareButton"
 import { AccountMenu } from "@/components/AccountMenu"
 import { CollaboratorAvatars } from "@/components/CollaboratorAvatars"
-import { ZoomControl } from "@/components/ZoomControl"
+import { BottomPill } from "@/components/BottomPill"
+
+/**
+ * A straight arrow: the arrow tool's output, two endpoints and a painted head.
+ *
+ * Distinguished from the legacy block arrow by point count alone — see isBlockArrow.
+ * Both answer to `shape: "arrow"`, because the boards that hold the old ones cannot be
+ * rewritten from here.
+ */
+function isStraightArrow(s: { shape?: string; points: number[] }) {
+  return s.shape === "arrow" && s.points.length === 4
+}
 
 const GRID_SPACING = 40 // world units between dots
 // Screen px of pull toward an alignment. Screen rather than world, so the grab feels the
@@ -987,6 +1005,20 @@ export function BoardCanvas({
      * a different system (THEMES in lib/theme.ts) and are looked up per draw as before.
      */
     const paint = canvasTokens()
+
+    /**
+     * Tools that place generated geometry by dragging a start and an end.
+     *
+     * Arrow joined Shapes here rather than growing its own gesture: the drag, the
+     * regenerate-from-anchor on every move, the click-to-select-instead-of-stacking
+     * guard and the history entry are identical work. All that differs is which kind
+     * comes out, which is placedKind's job.
+     */
+    const isPlacingTool = (t: Tool) => t === "shape" || t === "arrow"
+    /** The shape a placing drag produces: the armed kind, unless Arrow forced it. */
+    const placedKind = (): PlacedShape =>
+      toolRef.current === "arrow" ? "arrow" : shapeKindRef.current
+
     let panning = false
     let last = { x: 0, y: 0 }
     let spaceHeld = false
@@ -1709,20 +1741,21 @@ export function BoardCanvas({
         // other order lets the fill cover the inner half of every line, which reads as
         // a shape whose outline is half as thick as the width says.
         /**
-         * Arrows are SOLID, always.
+         * Block arrows are SOLID, always.
          *
-         * Their geometry is already a closed block-arrow outline — a rectangular shaft
-         * running into a triangular head — but it was only ever stroked, so it drew as a
-         * thin hollow outline of an arrow rather than an arrow. A pointer is a solid
-         * mark; an outlined one reads as a diagram of an arrow.
+         * Only the LEGACY ones reach here — boards seeded while the arrow was a shape
+         * carry a closed polygon outlining a shaft and head, and stroking that drew a
+         * thin hollow outline of an arrow rather than an arrow. Filling by default rather
+         * than at placement time is what makes those existing objects come out solid; an
+         * explicit fill still wins, so recolouring keeps working.
          *
-         * Solid by default rather than by setting `fill` at placement time, so every
-         * arrow already on a board becomes solid too, and so do the ones templates
-         * generate. An explicit fill still wins, which keeps recolouring working.
+         * A straight arrow placed by the arrow tool is two endpoints and is never filled
+         * — it is a line, and its head is painted below.
          */
-        const solidArrow = s.shape === "arrow" || s.shape === "doubleArrow"
-        const fill = s.fill ?? (solidArrow ? ink : null)
-        if (fill && isFillable(s.shape)) {
+        const blockArrow = isBlockArrow(s.shape, s.points)
+        const fill = s.fill ?? (blockArrow ? ink : null)
+        // Geometry decides, not the kind — see hasInterior.
+        if (fill && hasInterior(s.shape, s.points)) {
           ctx.fillStyle = fill
           ctx.fill()
         }
@@ -1738,6 +1771,31 @@ export function BoardCanvas({
           const pressures = s.shape || s.dash ? null : pressuresOf(s)
           if (pressures) variableWidthStroke(ctx, s.points, pressures, width)
           else ctx.stroke()
+        }
+
+        /**
+         * The arrowhead: one small solid triangle, on the END point only.
+         *
+         * Painted here rather than baked into `points` so the arrow stays a line for
+         * every other purpose — see arrowHead. Solid regardless of the stroke's dash or
+         * width, because a head is a cap on the line, not a continuation of it; a dashed
+         * arrow with a dashed head reads as a broken shape.
+         */
+        if (isStraightArrow(s)) {
+          const [ax, ay, bx2, by2] = s.points
+          const h = arrowHead(ax, ay, bx2, by2)
+          if (h) {
+            ctx.save()
+            ctx.setLineDash([])
+            ctx.fillStyle = ink
+            ctx.beginPath()
+            ctx.moveTo(h.left.x, h.left.y)
+            ctx.lineTo(h.tip.x, h.tip.y)
+            ctx.lineTo(h.right.x, h.right.y)
+            ctx.closePath()
+            ctx.fill()
+            ctx.restore()
+          }
         }
 
         // Texture passes. The grain stays at a uniform width even on a pressure
@@ -2141,7 +2199,11 @@ export function BoardCanvas({
       // pen to move around. They never touch the selection.
       // In a read-only view EVERY press pans: there is no tool, no selection and
       // nothing to grab, so the one gesture left is moving the camera.
-      const forcePan = readOnlyRef.current || e.button === 1 || (e.button === 0 && spaceHeld)
+      const forcePan =
+        readOnlyRef.current ||
+        toolRef.current === "pan" ||
+        e.button === 1 ||
+        (e.button === 0 && spaceHeld)
 
       // Plain left button in Select mode: the hit test owns the gesture. An object
       // under the cursor takes it; empty canvas deselects and falls through to a pan.
@@ -2308,13 +2370,13 @@ export function BoardCanvas({
         return
       }
 
-      if (toolRef.current !== "pen" && toolRef.current !== "shape") return
+      if (toolRef.current !== "pen" && !isPlacingTool(toolRef.current)) return
 
       // With Shapes armed, a click landing ON an existing object selects it instead of
       // starting another one on top. Outline proximity, NOT bbox containment: clicking
       // the open interior of a rectangle has to keep starting a new shape, or drawing a
       // box inside a box becomes impossible. Double-click is the forgiving one.
-      if (toolRef.current === "shape") {
+      if (isPlacingTool(toolRef.current)) {
         const p = toWorld(e)
         const hit = pickObject(objects, p.x, p.y, SELECT_SLOP / view.scale)
         if (hit) {
@@ -2329,7 +2391,7 @@ export function BoardCanvas({
       shiftDrawn = e.shiftKey // latched here, then topped up on move and keydown
       capturePointer(e.pointerId)
       const p = toWorld(e)
-      const placingShape = toolRef.current === "shape"
+      const placingShape = isPlacingTool(toolRef.current)
       shapeAnchor = placingShape ? p : null
       const brushKind = placingShape ? "pen" : brushRef.current
       const bDef = BRUSHES[brushKind]
@@ -2355,12 +2417,12 @@ export function BoardCanvas({
         // A shape is exact from the first frame — generated geometry, never smoothed
         // ink. It starts degenerate and is regenerated on every move.
         points: placingShape
-          ? shapePoints(shapeKindRef.current, p.x, p.y, p.x, p.y)
+          ? shapePoints(placedKind(), p.x, p.y, p.x, p.y)
           : [p.x, p.y],
-        ...(placingShape ? { shape: shapeKindRef.current } : {}),
+        ...(placingShape ? { shape: placedKind() } : {}),
         // Conditional spread, so an unfilled shape carries no `fill` key at all rather
         // than an explicit undefined — absence is the off state, same as `shape`.
-        ...(placingShape && shapeFillRef.current && isFillable(shapeKindRef.current)
+        ...(placingShape && shapeFillRef.current && isFillable(placedKind())
           ? { fill: shapeFillRef.current }
           : {}),
         // Stylus pressure, one entry per point from here on. Recorded only for a real
@@ -2491,7 +2553,7 @@ export function BoardCanvas({
         // Regenerated from the anchor each move rather than accumulated, so dragging
         // back past the origin flips the shape instead of corrupting it.
         const p = toWorld(e)
-        drawing.points = shapePoints(shapeKindRef.current, shapeAnchor.x, shapeAnchor.y, p.x, p.y)
+        drawing.points = shapePoints(placedKind(), shapeAnchor.x, shapeAnchor.y, p.x, p.y)
         requestDraw()
         return
       }
@@ -2935,8 +2997,14 @@ export function BoardCanvas({
       {!hideUI && (
         <>
           <ExportButton render={(scale, pad) => exportRef.current(scale, pad)} name={boardName} />
-          <ZoomControl
+          <BottomPill
             viewRef={viewRef}
+            tool={tool}
+            onToolChange={changeTool}
+            canUndo={hist.canUndo}
+            canRedo={hist.canRedo}
+            onUndo={() => step("undo")}
+            onRedo={() => step("redo")}
             onZoom={(dir) => zoomRef.current(dir)}
             onZoomTo={(scale) => zoomToRef.current(scale)}
             onZoomToFit={() => fitRef.current()}
@@ -3051,10 +3119,6 @@ export function BoardCanvas({
         shapeFill={shapeFill}
         onShapeFillChange={setShapeFill}
         onShapeKindChange={setShapeKind}
-        canUndo={hist.canUndo}
-        canRedo={hist.canRedo}
-        onUndo={() => step("undo")}
-        onRedo={() => step("redo")}
         noteColor={noteColor}
         onNoteColorChange={setNoteColor}
         brush={brush}

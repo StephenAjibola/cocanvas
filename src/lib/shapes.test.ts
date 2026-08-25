@@ -108,16 +108,15 @@ test("a star has ten alternating vertices and stands upright", () => {
 })
 
 test("an arrow points the way the drag went", () => {
-  // Rewritten when the arrow stopped being box-aligned. It used to be built inside its
-  // bounding box and mirrored when the drag ran leftward, so the tip always sat on the
-  // box's horizontal centre line and both directions shared a bounding box. It is now
-  // DIRECTIONAL — the tip lands on the drag's end point at any angle — which is a
-  // stronger version of the same promise and the only version a diagonal arrow can keep.
-  const tip = (p: number[]) => [p[6], p[7]]
+  // Rewritten twice. First when the arrow stopped being box-aligned, then again when it
+  // stopped being a shape at all: it is a straight LINE now, so its two points ARE its
+  // tail and its tip, and there is no polygon to read a tip out of. The promise is
+  // unchanged and now trivially true — it points where you dragged, at any angle.
+  const tip = (p: number[]) => [p[2], p[3]]
 
   assert.deepEqual(tip(shapePoints("arrow", 0, 0, 100, 60)), [100, 60], "points where dragged")
   assert.deepEqual(tip(shapePoints("arrow", 100, 60, 0, 0)), [0, 0], "and the other way")
-  // The case the old geometry could not express at all.
+  // The case the old box-aligned geometry could not express at all.
   assert.deepEqual(tip(shapePoints("arrow", 0, 0, 0, 120)), [0, 120], "straight down")
 })
 

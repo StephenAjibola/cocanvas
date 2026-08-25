@@ -1,6 +1,6 @@
 // Value import, so the explicit .ts specifier is required for `node --test` to resolve
 // it at runtime — the type-only import below is erased and needs none.
-import { type ShapeKind, isFillable } from "./shapes.ts"
+import { type ShapeKind, hasInterior } from "./shapes.ts"
 import type { BrushKind } from "./brushes"
 import type { ConnectorSide } from "./connectors"
 
@@ -269,7 +269,8 @@ export function pointInPolygon(p: number[], x: number, y: number) {
  * while deleting any pen stroke in the same gesture — ink is present along its whole
  * path, an outline is not. Selection deliberately does NOT pass it: clicking the open
  * interior of a rectangle has to keep starting a new shape, which is what makes nesting
- * possible. Lines and connectors are excluded by isFillable, having no inside.
+ * possible. Lines, connectors and straight arrows are excluded by hasInterior, having
+ * no inside.
  */
 export function hitsStroke(
   s: Stroke,
@@ -283,7 +284,7 @@ export function hitsStroke(
   const reach = s.width / 2 + slop
   const reachSq = reach * reach
 
-  if ((s.fill || solid) && isFillable(s.shape) && pointInPolygon(p, x, y)) return true
+  if ((s.fill || solid) && hasInterior(s.shape, p) && pointInPolygon(p, x, y)) return true
 
   if (p.length === 2) {
     const dx = x - p[0]

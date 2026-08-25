@@ -114,14 +114,19 @@ function panel(
   } as BoardObject
 }
 
-/** A solid directional arrow. */
+/**
+ * A straight arrow: a line from A to B with one solid head at B.
+ *
+ * No `fill`. Its geometry is the two endpoints — the head is painted from them by the
+ * renderer — so a fill here would be a fill on a line, which paints nothing and only
+ * misleads the property panel into offering to change it.
+ */
 function arrow(x0: number, y0: number, x1: number, y1: number): BoardObject {
   return {
     id: crypto.randomUUID(),
     type: "stroke",
     points: shapePoints("arrow", x0, y0, x1, y1),
     color: MUTED,
-    fill: MUTED,
     width: STROKE_WIDTH,
     shape: "arrow",
     createdAt: stamp(),

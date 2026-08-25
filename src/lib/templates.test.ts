@@ -83,9 +83,16 @@ test("frames are FILLED, not hollow outlines", () => {
   // The first version drew unfilled rectangles, which read as a wireframe rather than a
   // board — a card in the source designs is a white panel with a hairline border, and an
   // outline is a drawing OF that card. Every framing shape must carry a fill.
+  //
+  // Arrows are the one exception, and not a loophole: an arrow is a straight LINE, so it
+  // has no interior to fill. Its head is painted from its endpoints by the renderer.
   for (const id of TEMPLATE_IDS) {
     for (const o of templateObjects(id)) {
       if (o.type !== "stroke") continue
+      if (o.shape === "arrow") {
+        assert.ok(!o.fill, `${id}: an arrow carries a fill, but a line has nothing to fill`)
+        continue
+      }
       assert.ok(o.fill, `${id}: a shape has no fill and will render as a wireframe`)
     }
   }
@@ -146,16 +153,16 @@ test("kanban has four columns, ordered left to right and not overlapping", () =>
   }
 })
 
-test("mind map connectors are solid arrows, closed and painted under the notes", () => {
+test("mind map connectors are straight arrows, painted under the notes", () => {
   const objects = templateObjects("mindmap")
   const links = objects.filter((o) => o.type === "stroke")
   assert.ok(links.length >= 3, "expected a branch per node")
   for (const l of links) {
     if (l.type !== "stroke") continue
-    assert.equal(l.shape, "arrow", "branches must be solid directional arrows")
-    // fill() needs the outline to return to its start; an open path paints a wedge.
-    assert.equal(l.points[0], l.points[l.points.length - 2], "arrow outline is not closed in x")
-    assert.equal(l.points[1], l.points[l.points.length - 1], "arrow outline is not closed in y")
+    assert.equal(l.shape, "arrow", "branches must be arrows")
+    // Two endpoints, not a closed polygon. A branch is a line with a head on it; baking
+    // the head into the geometry is what made an arrow a shape rather than a connector.
+    assert.equal(l.points.length, 4, "branch is not a straight two-point arrow")
   }
   const lastLink = Math.max(...links.map((o) => o.createdAt))
   const firstNote = Math.min(...objects.filter((o) => o.type === "note").map((o) => o.createdAt))

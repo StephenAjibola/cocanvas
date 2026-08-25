@@ -7,7 +7,7 @@ import type { BoardObject } from "@/lib/objects"
 import { FONT_SIZES, NOTE_FONT, STICKY_COLORS } from "@/lib/notes"
 import { type LineStyle } from "@/lib/strokes"
 import { DEFAULT_CURVE } from "@/lib/connectors"
-import { isFillable } from "@/lib/shapes"
+import { hasInterior } from "@/lib/shapes"
 import { FILL_SWATCHES, pickerSwatches, type Theme } from "@/lib/theme"
 import { ColorPicker, CustomColorSwatch } from "@/components/ColorPicker"
 
@@ -68,7 +68,7 @@ export function SelectionPanel({
   // the object's own field so the segmented control has something to compare against.
   const [dash, setDash] = useState<LineStyle | null>(isBox ? null : (object.dash ?? null))
   const [curved, setCurved] = useState(!isBox && Boolean(object.curve))
-  const fillable = object.type === "stroke" && isFillable(object.shape)
+  const fillable = object.type === "stroke" && hasInterior(object.shape, object.points)
   // Only a connector has two ends to bow between. A pen stroke or a rectangle has no
   // meaningful curve, so it never gets the control.
   const curvable = object.type === "stroke" && object.shape === "connector"

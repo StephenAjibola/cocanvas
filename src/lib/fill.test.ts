@@ -61,14 +61,14 @@ test("point-in-polygon handles the concave shapes, not just boxes", () => {
   assert.equal(pointInPolygon(star, 100, 100), true, "centre is inside")
   assert.equal(pointInPolygon(star, 6, 6), false, "top-left corner is between points")
 
-  // A horizontal arrow, so the geometry is easy to reason about: a thin shaft along y=0
-  // widening into a head near the tip. The notch between shaft and head is the concavity
-  // a convex-hull test would get wrong — the point that matters is one sitting inside the
-  // bounding box but outside the shape.
-  const arrow = shapePoints("arrow", 0, 0, 200, 0)
-  assert.equal(pointInPolygon(arrow, 40, 0), true, "on the shaft")
-  assert.equal(pointInPolygon(arrow, 190, 0), true, "inside the head, near the tip")
-  assert.equal(pointInPolygon(arrow, 40, 30), false, "above the shaft, inside the bbox")
+  // The notches BETWEEN the star's arms are the points that matter: each sits inside the
+  // bounding box but outside the shape, which is exactly what a convex-hull test gets
+  // wrong. (This used to probe an arrow's shaft-to-head notch too. An arrow is a straight
+  // line now with no interior at all, so it has nothing left to be inside of — see
+  // arrow.test.ts.)
+  assert.equal(pointInPolygon(star, 100, 60), true, "up inside the top arm")
+  assert.equal(pointInPolygon(star, 55, 120), false, "notch between two arms")
+  assert.equal(pointInPolygon(star, 100, 175), false, "notch between the two legs")
 })
 
 test("fill and outline are independent, and both survive a clone", () => {

@@ -9,7 +9,7 @@ import type { RemoteCursor } from "@/lib/useBoardSync"
  * `cursorsRef` updates at pointer rate — every remote pointermove touches it, the
  * same firehose the canvas reads for the on-canvas cursor labels. A header re-render
  * on every one of those would cost far more than the canvas repaint it's next to, so
- * this polls instead (same pattern as SyncBadge and ZoomControl) and only calls
+ * this polls instead (same pattern as SyncBadge and BottomPill) and only calls
  * setState when the distinct name+color SET actually changes, not on every tick.
  */
 export function CollaboratorAvatars({ cursorsRef }: { cursorsRef: RefObject<RemoteCursor[]> }) {
