@@ -217,41 +217,54 @@ export function templateObjects(id: TemplateId): BoardObject[] {
       const CH = 620
       const GAP = 24
       const col = (i: number) => OX + (CW + GAP) * i
-      const cols = [
-        { name: "To Do", count: "5" },
-        { name: "In Progress", count: "2" },
-        { name: "Testing", count: "1" },
-        { name: "Done", count: "12" },
+      /**
+       * Cards first, columns second — because the count badge is DERIVED from this list.
+       *
+       * The badges used to be hand-written strings and had drifted: "Done" read 12 above
+       * a single card. A number that contradicts what is directly beneath it is worse
+       * than no number, and the only way it stays true as the seed content changes is if
+       * nothing has the chance to write it by hand.
+       */
+      const cards: { col: number; text: string; tag: string; tone: string }[] = [
+        { col: 0, tag: "Bug", tone: "Red", text: "Fix checkout button not responding on mobile" },
+        { col: 0, tag: "Feature", tone: "Blue", text: "Add dark mode toggle to settings" },
+        { col: 0, tag: "Spike", tone: "Orange", text: "Research pagination libraries for data tables" },
+        { col: 1, tag: "Integration", tone: "Purple", text: "Connect payment provider webhook" },
+        { col: 1, tag: "UI/UX", tone: "Blue", text: "Redesign empty state illustrations" },
+        { col: 2, tag: "Blocked", tone: "Red", text: "Cross-browser testing for signup flow" },
+        { col: 3, tag: "Done", tone: "Green", text: "Upgrade build tooling to latest version" },
       ]
+      const names = ["To Do", "In Progress", "Testing", "Done"]
+
       const out: BoardObject[] = [
-        label(OX, OY - 60, 700, "Sprint 24 Kanban Board", 26),
+        label(OX, OY - 60, 700, "Sprint Kanban Board", 26),
       ]
-      cols.forEach((c, i) => {
+      names.forEach((name, i) => {
+        const count = cards.filter((c) => c.col === i).length
         out.push(panel(col(i), OY, CW, CH, LANE))
-        out.push(label(col(i) + 20, OY + 18, CW - 80, c.name, 17))
-        out.push(label(col(i) + CW - 46, OY + 18, 30, c.count, 15, MUTED))
+        out.push(label(col(i) + 20, OY + 18, CW - 80, name, 17))
+        out.push(label(col(i) + CW - 46, OY + 18, 30, String(count), 15, MUTED))
       })
 
       // Cards, as the designs have them: a white panel with the ticket text on it.
-      const card = (ci: number, row: number, text: string, tag: string, tone: string) => {
-        const x = col(ci) + 16
+      const rows = [0, 0, 0, 0]
+      for (const c of cards) {
+        const row = rows[c.col]++
+        const x = col(c.col) + 16
         const y = OY + 58 + row * 130
-        out.push(note(x, y, CW - 32, 26, tone, tag))
-        out.push(panel(x, y + 30, CW - 32, 82, PANEL, text))
+        out.push(note(x, y, CW - 32, 26, c.tone, c.tag))
+        out.push(panel(x, y + 30, CW - 32, 82, PANEL, c.text))
       }
-      card(0, 0, "Fix authentication token expiration issue", "Bug", "Red")
-      card(0, 1, "Design System documentation updates for V2", "Feature", "Blue")
-      card(0, 2, "Evaluate new charting libraries for dashboard", "Spike", "Orange")
-      card(1, 0, "API Integration for User Provisioning via SCIM", "Integration", "Purple")
-      card(1, 1, "UI Polish: Floating toolbar glassmorphism effects", "UI/UX", "Blue")
-      card(2, 0, "End-to-end tests for payment gateway fallback", "Blocked", "Red")
-      card(3, 0, "Update dependencies to React 18", "Done", "Green")
       return out
     }
 
     case "mindmap": {
-      // The design's own branches: Navigation, Visual Identity, Onboarding, each with
-      // its own child notes hanging off it.
+      // Navigation, Visual Identity and Onboarding, each with its own child notes.
+      //
+      // The content is deliberately generic. It used to describe THIS project's rebrand —
+      // a centre node named after it, a "Glassmorphism panels" leaf — which made a
+      // template that is meant to be a starting point read as somebody else's finished
+      // notes. A seed should show the SHAPE of the method, not the author's own work.
       const CORE_W = 240
       const CORE_H = 120
       const BW = 180
@@ -264,8 +277,8 @@ export function templateObjects(id: TemplateId): BoardObject[] {
       const cx = OX + 640
       const cy = OY + 300
       const branches = [
-        { name: "Navigation", dx: 380, dy: -200, kids: ["Simplify bottom bar", "FAB placement"] },
-        { name: "Visual Identity", dx: 380, dy: 110, kids: ["Glassmorphism panels", "Update colour tokens"] },
+        { name: "Navigation", dx: 380, dy: -200, kids: ["Simplify menu structure", "Icon placement"] },
+        { name: "Visual Identity", dx: 380, dy: 110, kids: ["Refresh colour palette", "Update logo treatment"] },
         { name: "Onboarding", dx: -440, dy: 110, kids: ["Progressive disclosure"] },
       ]
 
@@ -299,7 +312,7 @@ export function templateObjects(id: TemplateId): BoardObject[] {
           )
         }
       }
-      notes.push(note(cx - CORE_W / 2, cy - CORE_H / 2, CORE_W, CORE_H, "Purple", "Project Phoenix"))
+      notes.push(note(cx - CORE_W / 2, cy - CORE_H / 2, CORE_W, CORE_H, "Purple", "New Product Launch"))
       for (const b of placed) {
         notes.push(note(b.bx, b.by, BW, BH, "Blue", b.name))
         for (const k of b.kids) notes.push(note(k.kx, k.ky, KW, KH, "Grey", k.text))

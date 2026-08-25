@@ -104,14 +104,14 @@ test("templates carry the designs' own content, not placeholder labels", () => {
   // you have typed anything.
   const withContent: [string, string][] = [
     ["swot", "Market Leader in Core Segment"],
-    ["kanban", "Fix authentication token expiration issue"],
+    ["kanban", "Fix checkout button not responding on mobile"],
     ["affinity", "Checkout process is too long."],
     ["persona", "Alex the Data Analyst"],
     ["journey", "Sees targeted ad on tech blog"],
     ["usability", "U_002"],
     ["roadmap", "Strategy Doc"],
     ["blueprint", "Process Registration"],
-    ["mindmap", "Project Phoenix"],
+    ["mindmap", "New Product Launch"],
     ["userflow", "Has Account?"],
   ]
   for (const [id, needle] of withContent) {
@@ -189,5 +189,72 @@ test("isTemplateId rejects anything that isn't one", () => {
   for (const id of TEMPLATE_IDS) assert.ok(isTemplateId(id))
   for (const bad of ["", "Blank", "gantt", "SWOT", null, undefined, 3, {}]) {
     assert.ok(!isTemplateId(bad), `${JSON.stringify(bad)} should not be a template`)
+  }
+})
+
+test("no template seeds content about THIS project", () => {
+  // Templates are starting points, not a record of the work that built the app. The
+  // kanban once held real CoCanvas tickets (auth tokens, SCIM, "glassmorphism effects")
+  // and the mind map mapped this very rebrand, so opening either read as somebody else's
+  // finished notes rather than an empty method to fill in.
+  //
+  // Matched case-insensitively against every piece of seeded text. The list is the
+  // vocabulary specific to building THIS app — a generic board would never contain it.
+  const OURS = [
+    "cocanvas",
+    "thinkframe",
+    "glassmorphism",
+    "scim",
+    "prisma",
+    "turbopack",
+    "next.js",
+    "yjs",
+    "sprint 24",
+  ]
+  for (const id of TEMPLATE_IDS) {
+    for (const o of templateObjects(id)) {
+      const text = (o.type === "note" ? o.text : o.type === "stroke" ? (o.text ?? "") : "")
+        .toLowerCase()
+      if (!text) continue
+      for (const term of OURS) {
+        assert.ok(!text.includes(term), `${id} seeds "${term}" — that is this project, not a template`)
+      }
+    }
+  }
+})
+
+test("kanban column badges match the cards actually in each column", () => {
+  // "Done" read 12 above a single card. A count that contradicts what is directly
+  // beneath it is worse than no count, and the badges are only trustworthy while they
+  // are derived rather than typed.
+  const objects = templateObjects("kanban")
+  const lanes = objects
+    .filter((o) => o.type === "stroke")
+    .map((o) => visualBounds(o))
+    .filter((b) => b.maxY - b.minY > 400)
+    .sort((a, b) => a.minX - b.minX)
+  assert.equal(lanes.length, 4)
+
+  // A card is the white panel carrying the ticket text; the tag above it is a note.
+  const cards = objects.filter(
+    (o) => o.type === "stroke" && o.text && visualBounds(o).maxY - visualBounds(o).minY < 200,
+  )
+  // Badges are the bare labels holding nothing but digits.
+  const badges = objects.filter((o) => o.type === "note" && o.bare && /^\d+$/.test(o.text))
+  assert.equal(badges.length, 4, "expected one count badge per column")
+
+  for (const lane of lanes) {
+    const inLane = (o: (typeof objects)[number]) => {
+      const b = visualBounds(o)
+      return b.minX >= lane.minX && b.maxX <= lane.maxX
+    }
+    const badge = badges.find(inLane)
+    assert.ok(badge && badge.type === "note", "a column has no badge")
+    const actual = cards.filter(inLane).length
+    assert.equal(
+      Number(badge.text),
+      actual,
+      `column badge says ${badge.text} but holds ${actual} cards`,
+    )
   }
 })
