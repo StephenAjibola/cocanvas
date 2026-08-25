@@ -1,0 +1,223 @@
+/**
+ * Sticky notes.
+ *
+ * A sibling of Stroke, never a subtype: a note is an axis-aligned box with text, and
+ * encoding it as a rect polyline would throw away the w/h that wrapping, the drop
+ * animation's centre and future resize handles all need. `type` is the discriminant,
+ * matching the Prisma BoardObject{type, data} column pair it persists into and the
+ * Y.Map<id, BoardObject> value it syncs as.
+ */
+
+import { contrastRatio } from "./contrast.ts"
+
+export type Note = {
+  id: string
+  type: "note"
+  /** Top-left corner, WORLD coordinates — same space as Stroke.points. */
+  x: number
+  y: number
+  w: number
+  h: number
+  /** Fill. The ink to write on it comes from STICKY_COLORS, not from the board theme. */
+  color: string
+  text: string
+  createdAt: number // paint order; Y.Map is unordered
+  /** See Stroke.z — explicit paint order, absent until the object is reordered. */
+  z?: number
+  /** See Stroke.locked — locked objects stay selectable so they can be unlocked. */
+  locked?: boolean
+  /**
+   * A free-floating TEXT BOX rather than a sticky: no fill, no border, just the words.
+   *
+   * The Text tool produces these. It reuses Note wholesale rather than adding a third
+   * member to the BoardObject union, because a text box needs exactly what a note
+   * already has — an axis-aligned box, a string, the inline textarea editor, selection,
+   * drag, resize, rotation, and the Y.Map round trip. A new type would have meant
+   * re-deriving every one of those and a new branch in each of hitsObject,
+   * objectBounds, translateObject, scaleGeometry, cloneObject and the renderer.
+   *
+   * ONE rule changes with it: `color` is the INK here, not the fill. A sticky derives
+   * readable ink from its background via inkFor; a bare box has no background to derive
+   * from, so the color the user picks is the text itself. See textBoxFor.
+   *
+   * ponytail: if text ever needs its own alignment, wrapping mode or rich runs, that is
+   * the point to split it into its own type — not before.
+   */
+  bare?: boolean
+  /**
+   * Text size in world units. Absent means NOTE_FONT, so every note written before the
+   * Text tool existed keeps its exact layout.
+   */
+  font?: number
+  /**
+   * Rotation in radians about the box's centre. x/y/w/h stay axis-aligned — an
+   * axis-aligned box cannot express rotation at all, which is the clearest reason this
+   * has to be a field rather than baked into the geometry.
+   */
+  angle?: number
+}
+
+/** Placed at a fixed size rather than dragged out — a sticky is a sticky. */
+export const NOTE_SIZE = 160
+export const NOTE_PADDING = 14 // world units of margin around the text
+export const NOTE_FONT = 15 // world units
+export const NOTE_LINE_HEIGHT = 1.35
+/**
+ * 2px, and deliberately not more.
+ *
+ * A sticky note is paper: real ones have a cut edge, not a moulded one. Everything else
+ * in the UI is software and rounds at 8px and up, so keeping the note nearly square is
+ * what separates board CONTENT from the chrome around it — at 4px it started to read as
+ * another card. Matches --radius-xs in globals.css.
+ */
+export const NOTE_RADIUS = 2
+
+/**
+ * Edge definition for a note.
+ *
+ * A single translucent black hairline rather than a per-theme border: every fill below
+ * is light, so on the dark board the fill already separates itself and this is
+ * invisible, while on #fafafa it is the only thing stopping a pale note from bleeding
+ * into the background. One constant beats a second palette.
+ */
+export const NOTE_BORDER = "rgba(0,0,0,0.12)"
+
+/** Default box for a placed text object. Wider than tall — text grows downward. */
+export const TEXT_SIZE = { w: 240, h: 44 }
+
+/**
+ * Inset for a bare text box.
+ *
+ * Much smaller than NOTE_PADDING: a sticky's padding is visible margin inside a
+ * coloured card, whereas here it is only grab room around the words, and 14 units of it
+ * would put the text visibly off-centre from its own selection outline.
+ */
+export const TEXT_PADDING = 4
+
+/** Offered in the selection panel. A short ladder beats a spinner nobody aims at. */
+export const FONT_SIZES = [12, 15, 18, 24, 32, 48]
+
+/**
+ * Sticky colors, each paired with the ink to write on it.
+ *
+ * Ink is per-swatch and NOT THEMES[theme].stroke. A note is its own background, so
+ * contrast is against the fill, not against the board — using the theme's ink would
+ * put white text on pale yellow the moment somebody switched to a dark board. Every
+ * pair is contrast-checked in notes.test.ts.
+ */
+export const STICKY_COLORS = [
+  { name: "Yellow", fill: "#fde68a", ink: "#422006" },
+  { name: "Orange", fill: "#fed7aa", ink: "#431407" },
+  { name: "Pink", fill: "#fbcfe8", ink: "#500724" },
+  { name: "Red", fill: "#fecaca", ink: "#450a0a" },
+  { name: "Green", fill: "#bbf7d0", ink: "#052e16" },
+  { name: "Teal", fill: "#99f6e4", ink: "#042f2e" },
+  { name: "Blue", fill: "#bfdbfe", ink: "#172554" },
+  { name: "Purple", fill: "#e9d5ff", ink: "#3b0764" },
+  { name: "Grey", fill: "#e5e7eb", ink: "#030712" },
+  { name: "White", fill: "#f8fafc", ink: "#0f172a" },
+]
+
+/**
+ * The ink for a fill.
+ *
+ * The table wins when it has an answer — those pairs are hand-tuned and score better
+ * than a two-way choice would. The fallback is computed rather than a fixed near-black,
+ * so a fill that never reaches this table (a future swatch, a synced note from another
+ * client) still gets ink that can actually be read on it.
+ */
+export function inkFor(fill: string) {
+  const paired = STICKY_COLORS.find((c) => c.fill.toLowerCase() === fill.toLowerCase())
+  if (paired) return paired.ink
+  return contrastRatio("#171717", fill) >= contrastRatio("#fafafa", fill)
+    ? "#171717"
+    : "#fafafa"
+}
+
+/**
+ * The box shape every axis-aligned board object shares. Structural, not `Note`: an
+ * ImageObject has the same x/y/w/h and none of Note's text fields, and passing one to
+ * these functions has to type-check without a cast.
+ */
+type Box2D = { x: number; y: number; w: number; h: number }
+
+export function noteBounds(n: Box2D) {
+  return { minX: n.x, minY: n.y, maxX: n.x + n.w, maxY: n.y + n.h }
+}
+
+/** Rect hit test, outset by `slop` so a note is as forgiving to grab as a stroke. */
+export function hitsNote(n: Box2D, x: number, y: number, slop: number) {
+  return (
+    x >= n.x - slop && x <= n.x + n.w + slop && y >= n.y - slop && y <= n.y + n.h + slop
+  )
+}
+
+/** Moves a note by (dx,dy) world units, in place — same contract as translateStroke. */
+export function translateNote(n: Box2D, dx: number, dy: number) {
+  n.x += dx
+  n.y += dy
+}
+
+/**
+ * Greedy word wrap.
+ *
+ * `measure` is injected rather than taking a canvas context, so this is testable
+ * without a DOM and the caller stays free to change the font without changing this.
+ * Explicit newlines split first: Enter in the textarea has to survive the round trip
+ * to canvas, or a typed paragraph break silently disappears on blur.
+ */
+export function wrapText(
+  text: string,
+  maxWidth: number,
+  measure: (s: string) => number,
+): string[] {
+  const lines: string[] = []
+
+  for (const para of text.split("\n")) {
+    if (!para) {
+      lines.push("") // a blank line is deliberate whitespace, not nothing
+      continue
+    }
+    let line = ""
+    for (const word of para.split(" ")) {
+      const candidate = line ? `${line} ${word}` : word
+      if (line && measure(candidate) > maxWidth) {
+        lines.push(line)
+        line = word
+      } else {
+        line = candidate
+      }
+      // A single word wider than the note has no break opportunity, so force one —
+      // otherwise it runs out past the edge and gets clipped mid-word.
+      while (measure(line) > maxWidth && line.length > 1) {
+        let cut = line.length
+        while (cut > 1 && measure(line.slice(0, cut)) > maxWidth) cut--
+        lines.push(line.slice(0, cut))
+        line = line.slice(cut)
+      }
+    }
+    lines.push(line)
+  }
+
+  return lines
+}
+
+// The drop: a placed note lands from slightly small and soft. back.out overshoots past
+// t=1 and settles, which is what makes it read as landing rather than growing.
+export const DROP_SCALE = 0.6 // scale at t=0
+export const DROP_ALPHA = 0.3 // opacity at t=0
+export const DROP_DURATION = 0.38 // seconds
+export const DROP_EASE = "back.out(1.7)"
+
+/**
+ * Visual weight at drop progress t. Linear in t on purpose — the ease supplies the
+ * overshoot, so t arrives here above 1 mid-flight and this must not clamp the scale or
+ * the bounce is flattened out.
+ */
+export function dropStyle(t: number) {
+  return {
+    scale: DROP_SCALE + (1 - DROP_SCALE) * t,
+    // Alpha does clamp: overshooting opacity is not a thing.
+    alpha: Math.min(1, DROP_ALPHA + (1 - DROP_ALPHA) * t),
+  }
+}

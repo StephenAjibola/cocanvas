@@ -1,0 +1,16 @@
+{
+  "name": "cocanvas-realtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Yjs WebSocket relay for CoCanvas boards.",
+  "scripts": {
+    "start": "node --env-file=../.env server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ws": "^8.21.2",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.32"
+  }
+}

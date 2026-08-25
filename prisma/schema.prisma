@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -11,73 +6,240 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
-model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  emailVerified DateTime?
-  name          String?
-  password      String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
 
-  memberships       Membership[]
-  verificationTokens VerificationToken[]
+model User {
+  id                 String              @id @default(cuid())
+  email              String              @unique
+  emailVerified      DateTime?
+  name               String?
+  // Auth.js AdapterUser includes `image`; PrismaAdapter passes the OAuth avatar straight through
+  image              String?
+  password           String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  accounts            Account[]
+  memberships         Membership[]
+  emailVerifications  EmailVerificationCode[]
+  passwordResetTokens PasswordResetToken[]
+  invitesSent         WorkspaceInvite[]
+  starredBoards       StarredBoard[]
+  comments            Comment[]
 }
 
-model VerificationToken {
+// Auth.js standard Account model — required by @auth/prisma-adapter for OAuth.
+// Field names are snake_case because they map 1:1 to the OAuth token response.
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model EmailVerificationCode {
   id        String   @id @default(cuid())
   token     String   @unique
   userId    String
   expiresAt DateTime
   createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
 
 model Workspace {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  memberships Membership[]
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique
+  /**
+   * A standing "anyone with this code may join" code, distinct from WorkspaceInvite.code.
+   *
+   * The difference matters: an invite code is addressed — it only works for the one email
+   * it was issued to, so leaking it buys nothing. THIS one is bearer authority. Whoever
+   * holds it can join, and there is no second factor behind it. That is the whole point
+   * (it is meant to be read out in a meeting), and also the whole risk.
+   *
+   * Two consequences follow, and both are deliberate:
+   *   - joining by workspace code grants JOIN_CODE_ROLE (VIEWER), never EDITOR. An
+   *     addressed invite carries whatever role the inviter chose because the inviter
+   *     chose the person; a code that anyone can repeat has not chosen anybody, so it
+   *     grants the least it can and a manager promotes from the People list afterwards.
+   *   - null means OFF. A workspace has no code until someone turns one on, and clearing
+   *     the column revokes it instantly. Regenerating writes a new one, which is the same
+   *     revoke plus an issue.
+   *
+   * No expiry and no use limit: a code with either would fail silently in the meeting it
+   * was meant for, and the honest control for bearer authority is an explicit off switch
+   * that a manager can see the state of.
+   */
+  joinCode    String?      @unique
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
   boards      Board[]
+  memberships Membership[]
+  invites     WorkspaceInvite[]
 }
 
-enum Role {
-  OWNER
-  EDITOR
-  VIEWER
+/**
+ * A pending invite: an email address, not yet a User, promised a Membership at `role`
+ * once they accept. Same shape as PasswordResetToken (random token, expiresAt) since
+ * it's the same job — prove the click came from the right inbox — plus which
+ * workspace and what role it grants on acceptance.
+ *
+ * One live invite per (workspace, email): re-inviting overwrites the row rather than
+ * stacking a second one, same "one live token" rule forgot-password already uses.
+ */
+model WorkspaceInvite {
+  id          String    @id @default(cuid())
+  email       String
+  role        Role      @default(EDITOR)
+  token       String    @unique
+  /**
+   * A short, human-enterable form of the same invite — "join with a code".
+   *
+   * NOT a second way in. Redeeming by code runs the identical checks the emailed link
+   * does, including that the signed-in address matches `email`, so a leaked code buys a
+   * stranger exactly as much as a leaked link: nothing. It exists because email is the
+   * fragile part of this flow — spam folders, delivery limits, and in this project's own
+   * dev setup a sending domain that can only reach one address.
+   *
+   * Nullable so invites created before this column keep working through their link; a
+   * null code simply means that invite has no short form.
+   */
+  code        String?   @unique
+  workspaceId String
+  invitedById String
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy   User      @relation(fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId])
 }
 
 model Membership {
-  id          String   @id @default(cuid())
-  role        Role     @default(EDITOR)
+  id          String    @id @default(cuid())
+  role        Role      @default(EDITOR)
   userId      String
   workspaceId String
-  createdAt   DateTime @default(now())
-
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([userId, workspaceId])
   @@index([workspaceId])
 }
 
 model Board {
-  id          String   @id @default(cuid())
+  id          String        @id @default(cuid())
   name        String
   workspaceId String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  objects   BoardObject[]
+  /**
+   * Which canvas background the board paints on — a CANVAS_KEYS key, validated in the
+   * PATCH route rather than by the DB, same as it always was.
+   *
+   * Was "dark" | "light" when this column only had to answer a two-way toggle. Widening
+   * it to the five named canvas colors needed no migration precisely because it is a
+   * plain string; "dark" and "light" stay live as aliases for black and white, so every
+   * row written before the panel existed still resolves. See CANVASES in lib/theme.ts.
+   *
+   * Defaults to white. "dark" was the default from before the app went light, and it is
+   * why a fresh board opened black while the chrome around it was white — the template
+   * paths only looked correct because they each passed theme: "light" by hand. The
+   * toggle is untouched: an explicit switch to dark still writes and still persists.
+   */
+  theme       String        @default("light")
+  // "none" | "dot" | "line" — a column rather than a client preference because the grid
+  // is a property of the board everyone sees, not of the browser looking at it. Default
+  // is the dot grid every board drew before the style was selectable.
+  gridStyle   String        @default("dot")
+  /**
+   * View-only share link, or null when the board is not shared.
+   *
+   * One nullable column rather than a ShareLink table: revoke is "set null" and
+   * regenerate is "overwrite", so the two operations the feature needs are both a
+   * single field write. A table would only start earning its keep with per-recipient
+   * links, expiry, or an access log — none of which exist yet.
+   *
+   * Unique because /view/[token] resolves a board by it; unguessable because it is 128
+   * bits of randomness, which is what stands in for authentication on that route.
+   */
+  shareToken  String?       @unique
+  /**
+   * What the share link GRANTS: "off" | "view" | "comment".
+   *
+   * Deliberately not a Role. A link visitor has no session and no Membership row — see
+   * /view/[token], which never calls auth() — so there is no membership for a role to
+   * live on, and adding a COMMENTER role would not have described guest access at all.
+   * The tier is a property of the LINK, so it belongs on the board next to the token.
+   *
+   * Two columns rather than one because they answer different questions: shareToken is
+   * "which link", shareAccess is "what it does". Revoking sets the token null; downgrading
+   * a live link to "off" keeps the token so it can be re-enabled without reissuing a URL
+   * everybody has already bookmarked.
+   *
+   * "comment" still requires signing in to POST — a comment carries an authorId, and an
+   * anonymous author is not a thing this schema can express.
+   */
+  shareAccess String        @default("off")
+  // Soft-delete: null means live. Set on DELETE, cleared on restore, and only a
+  // board already in this state can be purged — see the Trash routes.
+  deletedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  objects     BoardObject[]
+  starredBy   StarredBoard[]
+  comments    Comment[]
 
   @@index([workspaceId])
+}
+
+/**
+ * One row per (user, board) a user has starred — what backs the dashboard's Starred
+ * section.
+ *
+ * A join table rather than a flag on Membership because Membership is scoped to a
+ * WORKSPACE: a boolean there could only say "this user starred this workspace", which
+ * is not the question the dashboard asks. Starring is also per-user by nature — one
+ * member starring a board must not put it in everyone else's Starred row — and a column
+ * on Board could not express that at all.
+ *
+ * The composite id IS the uniqueness rule: starring twice is the same row, so the
+ * toggle needs no read-before-write and a double-click cannot stack duplicates.
+ */
+model StarredBoard {
+  userId    String
+  boardId   String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@id([userId, boardId])
+  @@index([boardId])
 }
 
 model BoardObject {
@@ -87,8 +249,75 @@ model BoardObject {
   data      Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
 
   @@index([boardId])
+}
+
+/**
+ * A comment on a board — append-only discussion, deliberately NOT part of the Yjs
+ * document that carries strokes and shapes.
+ *
+ * Two reasons it lives in Postgres instead. Comments need a verified author, and the
+ * Y.Map has no per-message auth: the realtime token gates entry to a room, not who a
+ * message claims to be from, so authorship written through the CRDT would be a claim
+ * rather than a fact. And comments are append-only with a durable order, which is what a
+ * table is for — the conflict-resolution a CRDT buys you is solving a problem discussion
+ * threads do not have.
+ *
+ * Replies are a self-relation one level deep by convention: `parentId` null is a thread,
+ * non-null is a reply to that thread. Nothing enforces the depth in the schema, so the
+ * POST route refuses a reply to a reply rather than letting arbitrary nesting appear.
+ */
+model Comment {
+  id       String  @id @default(cuid())
+  boardId  String
+  authorId String
+  content  String
+  resolved Boolean @default(false)
+  parentId String?
+
+  /**
+   * The object this pin is stuck to, as a BARE STRING — no relation, and that is
+   * load-bearing.
+   *
+   * PUT /api/board/[boardId]/objects persists by deleting every BoardObject row for the
+   * board and recreating them. A foreign key here would therefore either cascade-delete
+   * every anchored comment on every save, or fail the transaction and break saving
+   * outright. The id VALUE is stable across that churn (the route preserves o.id), so
+   * storing it loosely gets the association without the referential integrity that would
+   * be actively harmful here.
+   *
+   * Null for a pin dropped on empty canvas.
+   */
+  objectId String?
+
+  /**
+   * Where the pin sits, in world coordinates.
+   *
+   * Kept even when objectId is set, for two reasons: it is where the pin draws before
+   * the object is looked up, and it is where the pin STAYS if that object is erased. A
+   * thread outliving the shape it was about is the desired behaviour — the discussion is
+   * often why the shape went away.
+   */
+  anchorX Float
+  anchorY Float
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  board   Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  author  User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent  Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies Comment[] @relation("CommentReplies")
+
+  // The panel's default view is "open threads on this board", which is exactly this.
+  @@index([boardId, resolved])
+  @@index([parentId])
+}
+
+enum Role {
+  OWNER
+  EDITOR
+  VIEWER
 }

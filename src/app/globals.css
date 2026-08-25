@@ -1,26 +1,667 @@
 @import "tailwindcss";
 
+/**
+ * Two palettes, one hue family. The PAGES are light — white ground, navy ink — and navy
+ * carries the chrome on top of it: buttons, links, borders, icons, accents. The parts
+ * that were black or grey before are navy now; the ground never is.
+ *
+ * The exception is the chrome that floats over the BOARD (toolbar, context menu,
+ * selection panel). That sits on the canvas rather than on a page, so it keeps the dark
+ * navy shell: navy chrome on the dark board scores 1.31 against 1.07 for the old
+ * near-black pill, which is the separation that makes it read as floating at all.
+ *
+ * The board canvas itself is deliberately NOT in here — it stays neutral (see
+ * src/lib/theme.ts). A navy drawing surface sits in the same hue neighbourhood as the
+ * Blue and Purple swatches and as any blue a user draws, which reads as low separation
+ * even though the contrast ratio barely moves.
+ *
+ * Every ratio quoted below is measured with contrastRatio() in src/lib/contrast.ts,
+ * not eyeballed.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /**
+   * ════════ COCANVAS DESIGN TOKENS ════════
+   *
+   * The source of truth. Everything below this block — the ink/paper/accent names the
+   * existing components already use — are ALIASES onto these, so ~150 class usages get
+   * the new palette without 150 edits and a 151st that gets missed.
+   *
+   * Every ratio quoted is measured with contrastRatio() in src/lib/contrast.ts.
+   */
+
+  /* ---- Surfaces ---- */
+  --surface: #f8f9fa;
+  --surface-dim: #d9dadb;
+  --surface-bright: #f8f9fa;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #f3f4f5;
+  --surface-container: #edeeef;
+  --surface-container-high: #e7e8e9;
+  --surface-container-highest: #e1e3e4;
+  --surface-variant: #e1e3e4;
+
+  /* ---- Content on those surfaces ---- */
+  --on-surface: #191c1d; /* body and headings — 16.26 on --surface */
+  --on-surface-variant: #424656; /* secondary text and labels — 8.89 */
+  --inverse-surface: #2e3132;
+  --inverse-on-surface: #f0f1f2;
+
+  /* ---- Lines ---- */
+  --outline: #727687; /* control borders — 4.28 on --surface, clears 1.4.11's 3.0 */
+  --outline-variant: #c2c6d8; /* hairlines and dividers — decorative */
+
+  /* ---- Primary (violet) ---- */
+  --primary: #7F00FF; /* 5.95 as link text on surface, 6.28 under white as a fill */
+  --on-primary: #ffffff;
+  /* A light TINT, not a fill — it carries --on-primary-container at 13.64, and white on
+   * it is 1.26. Chips, badges and selected rows, never a button under white text. */
+  --primary-container: #F0DFFF;
+  --on-primary-container: #2B0052;
+  --inverse-primary: #D6B3FF; /* primary AS TEXT on a dark ground — 10.48 on #121212 */
+  --surface-tint: #7F00FF;
+
+  /* ---- Secondary ---- */
+  --secondary: #6b38d4; /* 6.68 under white */
+  --on-secondary: #ffffff;
+  --secondary-container: #8455ef;
+  --on-secondary-container: #fffbff;
+
+  /* ---- Tertiary ---- */
+  --tertiary: #914300; /* 6.98 under white */
+  --on-tertiary: #ffffff;
+  --tertiary-container: #b75600;
+  --on-tertiary-container: #fff6f3;
+
+  /* ---- Error ---- */
+  --error: #ba1a1a; /* 6.46 under white */
+  --on-error: #ffffff;
+  --error-container: #ffdad6;
+  --on-error-container: #93000a;
+
+  /* ---- Fixed pairs: hold their value across light and dark ---- */
+  --primary-fixed: #F0DFFF; /* --primary on this scores 4.99 — the chip/badge tint */
+  --primary-fixed-dim: #D6B3FF;
+  --on-primary-fixed: #2B0052;
+  --on-primary-fixed-variant: #6200D9; /* the darker violet a hover on light needs — 8.33 */
+  --secondary-fixed: #e9ddff;
+  --secondary-fixed-dim: #d0bcff;
+  --on-secondary-fixed: #23005c;
+  --on-secondary-fixed-variant: #5516be;
+  --tertiary-fixed: #ffdbc8;
+  --tertiary-fixed-dim: #ffb68b;
+  --on-tertiary-fixed: #321200;
+  --on-tertiary-fixed-variant: #753400;
+
+  /**
+   * NAVY HAS TWO JOBS, AND ONLY ONE OF THEM IS A BUG WHEN YOU SEE IT AS A BACKGROUND.
+   *
+   * Read this before "fixing" a navy surface — the distinction has been re-flagged as a
+   * regression once already, and the two cases look identical in a screenshot.
+   *
+   * 1. ON THE BOARD CANVAS VIEW — dark chrome is INTENTIONAL and confirmed. The header,
+   *    the tool rail, the colour/canvas panels, the zoom control and the export button
+   *    are all ink-850 on purpose: a dark frame around a light canvas, the same
+   *    convention Figma, Illustrator and Premiere use. It keeps the chrome from
+   *    competing with the artwork, and it is why paper-100/300/500 exist at all — those
+   *    tokens are defined as ink ON navy and are meaningless anywhere else. Leave it.
+   *
+   * 2. ON MARKETING AND DASHBOARD SURFACES — a navy PAGE background is the regression.
+   *    Those pages are light ground (paper-0 / paper-25 / paper-50) with navy used only
+   *    as ink and accent as the interactive colour. That was fixed and stays fixed.
+   *
+   * The rule in one line: navy is a SURFACE only inside the board's floating chrome, and
+   * INK everywhere else.
+   */
+
+  /* ---- Navy: INK on the light pages, and SURFACE on the floating board chrome. ---- */
+  --ink-950: #0b0f1c; /* deepest navy — the floating chrome's own ground */
+  /* Primary text on light. Aliased to the semantic token so there is exactly one
+   * near-black in the system rather than two that differ by a hue nobody can name. */
+  --ink-900: var(--text-primary);
+  --ink-850: #1b2540; /* floating chrome shell (toolbar, menus, panel) */
+  --ink-800: #243050; /* raised surface inside that chrome */
+  /* Secondary text on light (10.70). On the DARK chrome this is a border and a hover
+   * wash only: paper-500 scores 3.64 against it, so nothing sets body text on it there. */
+  --ink-700: #303d60;
+  /* Muted text and placeholders on light — same aliasing as ink-900 above. */
+  --ink-500: var(--text-secondary);
+  /* Input and control borders. 3.57 on white, so it clears the 3:1 that 1.4.11 asks of
+   * a component boundary — which is the whole reason it is not ink-200. */
+  --ink-400: var(--outline);
+  --ink-200: var(--outline-variant); /* hairlines and dividers */
+
+  /* ---- Light: the page ground, and INK on the dark floating chrome. ---- */
+  --paper-0: var(--surface-container-lowest); /* the innermost surface: inputs, cards */
+  /* A panel lifted off the page ground: dialogs and cards that need to read as ABOVE
+   * white without going grey. Aliased to --bg-panel. */
+  --paper-25: var(--bg-panel);
+  --paper-50: var(--bg-base); /* the page ground, row hover, hero wash */
+  --paper-100: #e8ebf5; /* pressed wash on light; primary ink on navy — 10.93 worst case */
+  --paper-300: #aeb6ce; /* secondary ink on navy — 6.43 worst case */
+  --paper-500: #9ba6c6; /* muted ink on navy — 5.37 worst case */
+
+  /**
+   * ---- SEMANTIC TOKENS ----
+   *
+   * These are the source of truth. Every ratio below is measured with contrastRatio()
+   * from src/lib/contrast.ts, not eyeballed.
+   *
+   * The numbered scales further down are now ALIASES of these. That indirection is the
+   * point of this pass: ~40 components already say `bg-accent-500` / `text-ink-500`, and
+   * pointing those names at semantic values re-colours all of them from one place rather
+   * than requiring 40 edits and a 41st file that gets missed. New code should reach for
+   * the semantic name; old code keeps working and gets the new palette for free.
+   */
+
+  /* Primary action, links, current selection. */
+  --accent: var(--primary);
+  --accent-hover: var(--on-primary-fixed-variant); /* #003fa4 — darkens on light */
+  /* The tint behind small accent moments — a dot, a badge, a selected row — so they read
+   * as accent-coloured at 10px instead of dissolving. --primary on it scores 5.38. */
+  --accent-soft: var(--primary-fixed);
+  /**
+   * The accent as it appears ON THE DARK BOARD CHROME, which is a different problem.
+   *
+   * --primary scores 2.42 against ink-850, under the 3.0 a component boundary wants — a
+   * filled avatar in it half-sinks into the chrome. --primary-container cannot cover for
+   * it here the way the blue one could: the violet container is a pale TINT (white on it
+   * is 1.26), so an avatar using it would lose its initial entirely.
+   *
+   * This is the one point on the violet ramp clearing both jobs at once: 3.25 against
+   * ink-850 and 4.66 under white text. It is the only value in the family that does.
+   *
+   * Transitional: Phase 7 replaces the navy chrome with glass, at which point the
+   * distinction collapses and this can alias straight to --primary.
+   */
+  --accent-on-chrome: #9B3DFF;
+
+  --bg-base: var(--surface);
+  --bg-panel: var(--surface-container-lowest);
+
+  --text-primary: var(--on-surface);
+  --text-secondary: var(--on-surface-variant);
+
+  /* ---- Numbered aliases, kept so existing utilities keep resolving. ---- */
+  --accent-500: var(--accent);
+  --accent-600: var(--accent-on-chrome);
+  --accent-700: var(--accent-hover);
+
+  /* Pink is the INTERACTION accent: focus rings, and the ring around a selected swatch.
+   * Chosen for a reason specific to this app rather than for taste — SWATCHES in
+   * src/lib/theme.ts claims yellow, orange, red, green, blue and purple, so pink is the
+   * only hue a user cannot draw with. A pink ring is therefore the one selection
+   * indicator that can never be mistaken for the swatch it is drawn around, which an
+   * indigo ring around the Blue swatch very much can.
+   *
+   * It takes two shades because one cannot span both grounds: pink-400 is 6.44 on
+   * ink-900 and only 2.68 on white. */
+  --pink-400: #e87ba8; /* dark chrome — focus and selection rings there */
+  --pink-300: #f09ab8; /* hover on dark — 8.25 on ink-900 */
+  --pink-600: #c2477d; /* focus ring on light — 4.68 on white */
+
+  --background: var(--surface);
+  --on-background: var(--on-surface);
+  --foreground: var(--on-background);
+
+  /**
+   * ---- SHAPE ----
+   *
+   * Replaces the previous system's global zero-radius rule outright; there is no leftover
+   * squaring rule to trip over.
+   *
+   * Prefixed `--cc-` because @theme's own `--radius-*` names are Tailwind's, and pointing
+   * a Tailwind key at a same-named variable is a self-reference that resolves to nothing.
+   * These are the real custom properties; the @theme block aliases them.
+   */
+  --cc-radius-xs: 0.125rem; /* 2px — the sticky-note corner, matching NOTE_RADIUS */
+  --cc-radius-sm: 0.25rem; /* 4px */
+  --cc-radius: 0.5rem; /* 8px — DEFAULT: buttons and tool icons */
+  --cc-radius-md: 0.75rem; /* 12px */
+  --cc-radius-lg: 1rem; /* 16px — cards, dialogs, panels */
+  --cc-radius-xl: 1.5rem; /* 24px — search bars and floating docks read as pills here */
+  --cc-radius-full: 9999px; /* true pills and circles: avatars, chips, the create button */
+
+  /**
+   * ---- SPACING ----
+   *
+   * Tailwind's spacing unit is already 0.25rem, so the 4px base is the scale the app is
+   * on and `p-4` is the 16px gutter. These name the values the spec calls out by ROLE, so
+   * a layout can say what it means rather than restating a number.
+   */
+  --cc-gutter: 1rem; /* 16px — between cards and form rows */
+  --cc-canvas-margin: 1.5rem; /* 24px — breathing room around the canvas */
+  --cc-toolbar-gap: 0.5rem; /* 8px — between tools in a rail or dock */
+
+  /**
+   * ---- ELEVATION ----
+   *
+   * Level 1 is the page. It has no treatment, which is the point — if everything is
+   * lifted, nothing is.
+   *
+   * Level 2 is a surface FLOATING OVER CONTENT: toolbars, docks, side panels. The blur
+   * is what makes it read as glass rather than as a translucent rectangle — it has to
+   * distort what is behind it, not just tint it.
+   *
+   * Level 3 is a surface floating over EVERYTHING: popovers, dialogs. Same glass, plus a
+   * cast shadow. The shadow is tinted with --primary rather than neutral grey because a
+   * grey shadow on a coloured ground reads as dirt; a shadow carrying a hint of the
+   * brand hue reads as light passing through something.
+   *
+   * color-mix keeps --primary the single source of truth — no parallel --primary-rgb to
+   * fall out of sync the next time the brand colour moves.
+   */
+  /* 70% let a dark canvas show through hard enough that the header read grey rather
+     than the --surface-container-lowest the chrome is specified as. 92% keeps the
+     blur and the see-through edge doing their work while the surface still reads as
+     white over a black board. */
+  --cc-glass-bg: color-mix(in srgb, var(--surface-container-lowest) 92%, transparent);
+  --cc-glass-blur: 20px;
+  --cc-glass-edge-inner: rgb(255 255 255 / 0.10);
+  --cc-glass-edge-outer: rgb(0 0 0 / 0.05);
+  --cc-elevation-3-shadow: 0 8px 30px color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+/**
+ * DARK MODE.
+ *
+ * Surfaces invert onto a #121212 base, as specified. The accent HUES do not shift — a
+ * blue button is the same blue on either ground, which is what keeps the brand stable.
+ *
+ * One deliberate exception, because the alternative is unreadable: --accent as TEXT.
+ * --primary on #121212 measures 2.69 and --primary-container 3.88, both under the 4.5 a
+ * link needs. --inverse-primary exists in the spec for exactly this role and scores
+ * 11.01, so accent-as-text maps to it here while accent-as-FILL keeps --primary (white
+ * on it is 6.98 regardless of what is behind the button). The identity is preserved;
+ * only the role that would have failed is remapped.
+ */
+/**
+ * OPT-IN FOR NOW — `<html data-theme="dark">` — not `prefers-color-scheme`, and that is
+ * a deliberate hold rather than a shortcut.
+ *
+ * The token VALUES below are final and measured. What is not ready is the ~150 component
+ * classes that consume them: this app has been light-only by design since inception (see
+ * the note further down), so a number of surfaces assume a white ground rather than
+ * asking for one. Switching the trigger to prefers-color-scheme right now hands anyone
+ * with a dark OS a half-inverted dashboard — faint wordmark, white card bodies on a dark
+ * page, a sidebar that only partly flips. Verified, not guessed: that is exactly what it
+ * rendered.
+ *
+ * Phases 6 and 7 rebuild the dashboard and the board, which is where the components get
+ * their dark pass. When that lands, this becomes:
+ *
+ *   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { … } }
+ *
+ * and the values here do not change. One line, once the surfaces can honour it.
+ */
+:root[data-theme="dark"] {
+    --surface: #121212;
+    --surface-dim: #0d0d0d;
+    --surface-bright: #2a2a2a;
+    --surface-container-lowest: #0a0a0a;
+    --surface-container-low: #1a1a1a;
+    --surface-container: #1e1e1e;
+    --surface-container-high: #282828;
+    --surface-container-highest: #333333;
+    --surface-variant: #1e1e1e;
+
+    --on-surface: #e3e3e3; /* 14.60 on #121212 */
+    --on-surface-variant: #c4c7c5;
+    --inverse-surface: #e3e3e3;
+    --inverse-on-surface: #191c1d;
+
+    --outline: #8e918f;
+    --outline-variant: #444746;
+
+    /* Accent text takes the light blue; accent FILLS keep --primary, untouched above. */
+    --accent: var(--inverse-primary);
+    --accent-hover: var(--primary-fixed);
+    --accent-soft: #1e2a4a; /* the tint has to darken, or a badge glows on a dark page */
 }
 
 @theme inline {
+  --color-ink-950: var(--ink-950);
+  --color-ink-900: var(--ink-900);
+  --color-ink-850: var(--ink-850);
+  --color-ink-800: var(--ink-800);
+  --color-ink-700: var(--ink-700);
+  --color-ink-500: var(--ink-500);
+  --color-ink-400: var(--ink-400);
+  --color-ink-200: var(--ink-200);
+
+  --color-paper-0: var(--paper-0);
+  --color-paper-25: var(--paper-25);
+  --color-paper-50: var(--paper-50);
+  --color-paper-100: var(--paper-100);
+  --color-paper-300: var(--paper-300);
+  --color-paper-500: var(--paper-500);
+
+  --color-accent-500: var(--accent-500);
+  --color-accent-600: var(--accent-600);
+  --color-accent-700: var(--accent-700);
+
+  --color-pink-400: var(--pink-400);
+  --color-pink-300: var(--pink-300);
+  --color-pink-600: var(--pink-600);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-on-chrome: var(--accent-on-chrome);
+
+  /* ---- The CoCanvas token set, as Tailwind utilities ---- */
+  --color-surface: var(--surface);
+  --color-surface-dim: var(--surface-dim);
+  --color-surface-bright: var(--surface-bright);
+  --color-surface-container-lowest: var(--surface-container-lowest);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-high: var(--surface-container-high);
+  --color-surface-container-highest: var(--surface-container-highest);
+  --color-surface-variant: var(--surface-variant);
+
+  --color-on-surface: var(--on-surface);
+  --color-on-surface-variant: var(--on-surface-variant);
+  --color-inverse-surface: var(--inverse-surface);
+  --color-inverse-on-surface: var(--inverse-on-surface);
+
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
+
+  --color-primary: var(--primary);
+  --color-on-primary: var(--on-primary);
+  --color-primary-container: var(--primary-container);
+  --color-on-primary-container: var(--on-primary-container);
+  --color-inverse-primary: var(--inverse-primary);
+  --color-surface-tint: var(--surface-tint);
+
+  --color-secondary: var(--secondary);
+  --color-on-secondary: var(--on-secondary);
+  --color-secondary-container: var(--secondary-container);
+  --color-on-secondary-container: var(--on-secondary-container);
+
+  --color-tertiary: var(--tertiary);
+  --color-on-tertiary: var(--on-tertiary);
+  --color-tertiary-container: var(--tertiary-container);
+  --color-on-tertiary-container: var(--on-tertiary-container);
+
+  --color-error: var(--error);
+  --color-on-error: var(--on-error);
+  --color-error-container: var(--error-container);
+  --color-on-error-container: var(--on-error-container);
+
+  --color-primary-fixed: var(--primary-fixed);
+  --color-primary-fixed-dim: var(--primary-fixed-dim);
+  --color-on-primary-fixed: var(--on-primary-fixed);
+  --color-on-primary-fixed-variant: var(--on-primary-fixed-variant);
+  --color-secondary-fixed: var(--secondary-fixed);
+  --color-secondary-fixed-dim: var(--secondary-fixed-dim);
+  --color-on-secondary-fixed: var(--on-secondary-fixed);
+  --color-on-secondary-fixed-variant: var(--on-secondary-fixed-variant);
+  --color-tertiary-fixed: var(--tertiary-fixed);
+  --color-tertiary-fixed-dim: var(--tertiary-fixed-dim);
+  --color-on-tertiary-fixed: var(--on-tertiary-fixed);
+  --color-on-tertiary-fixed-variant: var(--on-tertiary-fixed-variant);
+  --color-bg-base: var(--bg-base);
+  --color-bg-panel: var(--bg-panel);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+
+  /**
+   * Fonts reach Tailwind here, which is what makes `font-sans` / `font-display` real
+   * utilities rather than variables only the <html> element knows about.
+   *
+   * The fallback stacks are not decoration: next/font swaps, and for the ~100ms before
+   * the face lands the browser paints one of these. system-ui first means that flash is
+   * the platform's own UI font rather than Times New Roman.
+   */
+  --font-sans: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-geist), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /**
+   * ---- THE TYPE SCALE ----
+   *
+   * Declared as Tailwind text tokens, so `text-headline-lg` carries its size, weight,
+   * leading AND tracking together. That bundling is the point: a headline is not a
+   * font-size, it is a set of four values that only work as a set, and splitting them
+   * across `text-2xl font-semibold leading-tight tracking-tight` is how two headings on
+   * two pages end up subtly different.
+   *
+   * Fixed rem, not clamp(). Product UI is viewed at consistent DPI, and a fluid heading
+   * that shrinks inside a narrow panel looks worse rather than more responsive — the one
+   * place a size genuinely changes is handled by --text-headline-lg-mobile below.
+   */
+  --text-headline-lg: 2rem; /* 32px */
+  --text-headline-lg--line-height: 1.2;
+  --text-headline-lg--font-weight: 600;
+  --text-headline-lg--letter-spacing: -0.02em;
+
+  --text-headline-md: 1.5rem; /* 24px */
+  --text-headline-md--line-height: 1.2;
+  --text-headline-md--font-weight: 600;
+  --text-headline-md--letter-spacing: -0.01em;
+
+  /* The narrow-viewport cut of headline-lg. Same weight and leading, no negative
+   * tracking: at 24px the tightening that flatters 32px starts closing the counters. */
+  --text-headline-lg-mobile: 1.5rem; /* 24px */
+  --text-headline-lg-mobile--line-height: 1.2;
+  --text-headline-lg-mobile--font-weight: 600;
+
+  --text-body-lg: 1rem; /* 16px */
+  --text-body-lg--line-height: 1.5;
+  --text-body-lg--font-weight: 400;
+
+  --text-body-sm: 0.875rem; /* 14px */
+  --text-body-sm--line-height: 1.5;
+  --text-body-sm--font-weight: 400;
+
+  /* Leading of exactly 1.0 because these sit in tight rows — a chip, a shortcut cell, a
+   * layer row — where any extra leading shows up as the row growing, not as air. */
+  --text-label-mono: 0.75rem; /* 12px */
+  --text-label-mono--line-height: 1;
+  --text-label-mono--font-weight: 500;
+  --text-label-mono--letter-spacing: 0.05em;
+
+  /**
+   * ---- SHAPE ----
+   *
+   * This REPLACES the global zero-radius rule from the previous design system. That pass
+   * squared every corner in the app deliberately; CoCanvas restores a real scale, so the
+   * zeroing is gone rather than overridden — there is no leftover rule to trip over.
+   *
+   * Tailwind's own step names are remapped onto the spec's values, which is what makes
+   * `rounded-md` and friends produce CoCanvas radii instead of Tailwind defaults. The
+   * bare `rounded` utility resolves through --radius and is the workhorse: 0.5rem, the
+   * value the spec assigns to buttons and tool icons.
+   *
+   * --radius-xs exists only because Tailwind defines the step; nothing should reach for
+   * it over --radius-sm.
+   */
+  /**
+   * Tailwind's step names, pointed at the shape tokens declared on :root.
+   *
+   * The values themselves live on :root rather than here, and that is deliberate:
+   * `@theme inline` INLINES its values into the generated utilities instead of emitting
+   * them as custom properties, so declaring them here alone would make `rounded` work
+   * while `var(--radius-lg)` resolved to nothing in hand-written CSS. Verified, not
+   * assumed — every one of these read back as an empty string before the move. Phase 5's
+   * glass surfaces need them readable, and so does anyone writing plain CSS.
+   */
+  --radius-xs: var(--cc-radius-xs);
+  --radius-sm: var(--cc-radius-sm);
+  --radius: var(--cc-radius);
+  --radius-md: var(--cc-radius-md);
+  --radius-lg: var(--cc-radius-lg);
+  --radius-xl: var(--cc-radius-xl);
+  --radius-2xl: var(--cc-radius-xl);
+  --radius-3xl: var(--cc-radius-xl);
+  --radius-4xl: var(--cc-radius-xl);
+  --radius-full: var(--cc-radius-full);
+
+  --spacing-gutter: var(--cc-gutter);
+  --spacing-canvas-margin: var(--cc-canvas-margin);
+  --spacing-toolbar-gap: var(--cc-toolbar-gap);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/**
+ * Depth for LARGE EMPTY GROUNDS only — the landing hero and the auth pages.
+ *
+ * Deliberately not on the toolbar, the context menu or the selection panel: those are
+ * small, they already run backdrop-blur over a moving canvas, and a gradient under a
+ * blur reads as smear rather than as depth. Flat chrome is what keeps them legible.
+ *
+ * The darkest stop is #F7F8FC, so ink-900 over any point of this holds at least 16.29 —
+ * the gradient cannot push anything under AA no matter where a label lands on it.
+ *
+ * ponytail: one class, plain CSS. A Tailwind @utility would buy composability that
+ * exactly two pages would use.
+ */
+.bg-hero {
+  background:
+    radial-gradient(120% 85% at 50% 0%, var(--paper-0) 0%, transparent 62%),
+    /* Indigo kept to 8% and pushed into a corner. Any stronger and it stops reading as
+     * a light source and starts reading as a second background color, which is when
+     * the ground begins competing with the form sitting on top of it. */
+      radial-gradient(85% 65% at 88% 100%, rgb(79 99 200 / 8%) 0%, transparent 70%),
+    linear-gradient(160deg, var(--paper-0) 0%, var(--paper-50) 100%);
 }
 
+/* ponytail: no dark: variants anywhere — the pages are light in both OS themes and the
+ * board chrome is navy in both, the same way the toolbar pill was already dark on both
+ * board themes. A user-facing dark mode is a feature nobody has asked for, and adding it
+ * now would double every surface token. */
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /**
+   * THIS LINE WAS THE TYPOGRAPHY BUG, and it is worth naming so it does not come back.
+   *
+   * It read `Arial, Helvetica, sans-serif` — the untouched create-next-app default. Geist
+   * was being loaded and wired into --font-sans the whole time; this one declaration on
+   * `body` simply outranked it by specificity, so every page in the app rendered in Arial
+   * while the tokens said otherwise. The fonts were never missing. They were overridden.
+   */
+  font-family: var(--font-sans);
+}
+
+/**
+ * Space Grotesk carries headings and the wordmark; General Sans carries everything else.
+ *
+ * Scoped to h1-h4 rather than applied by utility class at each call site, so a heading is
+ * typeset correctly by virtue of being a heading. h5/h6 are deliberately left on the body
+ * face: at that size they are labels, and a display face at label size is noise — the
+ * product register is explicit that display fonts do not belong in UI chrome.
+ *
+ * text-wrap: balance evens out the line lengths of a wrapped heading, which is where an
+ * unbalanced h1 looks most obviously unconsidered.
+ */
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.2;
+  /* Evens out the line lengths of a wrapped heading, which is where an unbalanced h1
+   * looks most obviously unconsidered. */
+  text-wrap: balance;
+}
+
+/**
+ * h1 IS headline-lg, and drops to headline-lg-mobile on a narrow viewport.
+ *
+ * Expressed as a media query rather than a responsive utility at each call site, so a
+ * page cannot ship an h1 that forgot to shrink. 40rem is Tailwind's `sm` breakpoint —
+ * matched deliberately, so hand-written CSS and utility classes agree about where
+ * "mobile" ends instead of disagreeing by a few pixels.
+ */
+h1 {
+  font-size: var(--text-headline-lg-mobile);
+}
+
+@media (min-width: 40rem) {
+  h1 {
+    font-size: var(--text-headline-lg);
+    letter-spacing: -0.02em;
+  }
+}
+
+h2 {
+  font-size: var(--text-headline-md);
+  letter-spacing: -0.01em;
+}
+
+/* Not in the spec, which stops at two headline sizes. Continuing the same ~1.2 ratio
+ * rather than inventing a second system: 32 → 24 → 20 → 18. */
+h3 {
+  font-size: 1.25rem; /* 20px */
+}
+
+h4 {
+  font-size: 1.125rem; /* 18px */
+}
+
+/**
+ * ════════ ELEVATION UTILITIES ════════
+ *
+ * ⚠ BACKDROP-FILTER CREATES A CONTAINING BLOCK FOR position:fixed DESCENDANTS.
+ *
+ * This is not a theoretical footnote — it has already cost this codebase one bug. The
+ * board header carries a blur, and the Share dialog rendered inside it resolved its
+ * `fixed inset-0` against the header's 56px box instead of the viewport, so the whole
+ * modal was laid out inside a strip at the top of the screen with its header and buttons
+ * off-view. The fix was portalling the dialog to document.body.
+ *
+ * So: anything given `elevation-2` or `elevation-3` must not contain a fixed-position
+ * child that expects the viewport. Popovers opened from a glass surface belong in a
+ * portal. Every glass surface added from here on inherits that constraint.
+ *
+ * The two levels share a surface and differ only in the cast shadow, which is why
+ * elevation-3 composes the same custom properties rather than restating them.
+ */
+/**
+ * The blur comes from `@apply backdrop-blur-[20px]`, NOT a raw `backdrop-filter`
+ * declaration, and that is load-bearing rather than stylistic.
+ *
+ * Tailwind v4 drives backdrop-filter through its own `--tw-backdrop-*` composite, and a
+ * raw `backdrop-filter` written inside `@utility` is silently dropped by that machinery —
+ * the surface, border and shadow all landed while the blur computed to `none`. Verified
+ * on the live page: the same element gained `blur(20px)` the moment Tailwind's own
+ * utility was combined with it. Going through @apply keeps one class at the call site and
+ * lets Tailwind own the property it insists on owning.
+ */
+@utility elevation-2 {
+  @apply backdrop-blur-[20px];
+  background-color: var(--cc-glass-bg);
+  /* The outer hairline is a real border so it participates in layout; the inner
+   * highlight is an inset shadow, because a second border is not a thing an element
+   * has. Together they give the edge the two-tone bevel that reads as thickness. */
+  border: 1px solid var(--cc-glass-edge-outer);
+  box-shadow: inset 0 0 0 1px var(--cc-glass-edge-inner);
+}
+
+@utility elevation-3 {
+  @apply backdrop-blur-[20px];
+  background-color: var(--cc-glass-bg);
+  border: 1px solid var(--cc-glass-edge-outer);
+  box-shadow:
+    inset 0 0 0 1px var(--cc-glass-edge-inner),
+    var(--cc-elevation-3-shadow);
+}
+
+/**
+ * Glass depends on translucency, and translucency is exactly what a user who asked for
+ * reduced transparency does not want. The surface falls back to opaque; the elevation
+ * still reads through the border and shadow.
+ */
+@media (prefers-reduced-transparency: reduce) {
+  .elevation-2,
+  .elevation-3 {
+    background-color: var(--surface-container-lowest);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
