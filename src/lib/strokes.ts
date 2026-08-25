@@ -1,6 +1,7 @@
 // Value import, so the explicit .ts specifier is required for `node --test` to resolve
 // it at runtime — the type-only import below is erased and needs none.
 import { type ShapeKind, hasInterior } from "./shapes.ts"
+import type { TextMarks } from "./text-format.ts"
 import type { BrushKind } from "./brushes"
 import type { ConnectorSide } from "./connectors"
 
@@ -126,7 +127,19 @@ export type Stroke = {
    * testing, bounds, translation and dashing all keep working on it untouched.
    */
   curve?: number
-}
+  /**
+   * Marks this shape as a COLUMN: a lane that holds cards, with a "+" at its foot that
+   * adds another one.
+   *
+   * Set by the templates that lay columns out, because only they know which rectangle is
+   * a lane and which is a card sitting inside one. Inferring it from geometry instead —
+   * "a tall thin filled rect is probably a column" — would put a quick-add button on any
+   * tall rectangle somebody happened to draw.
+   */
+  section?: boolean
+  // Whole-object text formatting, shared with Note — see lib/text-format.ts. Only
+  // meaningful on a shape carrying a label; a freehand stroke has no text to format.
+} & TextMarks
 
 /** Solid is the absence of one of these — see Stroke.dash. */
 export type LineStyle = "dashed" | "dotted"

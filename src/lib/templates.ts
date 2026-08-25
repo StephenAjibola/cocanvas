@@ -100,6 +100,8 @@ function panel(
   bg = PANEL,
   text?: string,
   kind: "rect" | "diamond" | "ellipse" = "rect",
+  /** See Stroke.section — a lane that gets a quick-add "+" at its foot. */
+  section = false,
 ): BoardObject {
   return {
     id: crypto.randomUUID(),
@@ -110,6 +112,7 @@ function panel(
     width: STROKE_WIDTH,
     shape: kind,
     ...(text ? { text } : {}),
+    ...(section ? { section: true } : {}),
     createdAt: stamp(),
   } as BoardObject
 }
@@ -241,7 +244,7 @@ export function templateObjects(id: TemplateId): BoardObject[] {
       ]
       names.forEach((name, i) => {
         const count = cards.filter((c) => c.col === i).length
-        out.push(panel(col(i), OY, CW, CH, LANE))
+        out.push(panel(col(i), OY, CW, CH, LANE, undefined, "rect", true))
         out.push(label(col(i) + 20, OY + 18, CW - 80, name, 17))
         out.push(label(col(i) + CW - 46, OY + 18, 30, String(count), 15, MUTED))
       })

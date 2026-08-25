@@ -9,6 +9,7 @@ import {
   writeGeom,
 } from "./objects.ts"
 import type { LineStyle } from "./strokes"
+import type { TextAlign } from "./text-format"
 
 /**
  * Undo/redo for the board.
@@ -44,6 +45,19 @@ export type StylePatch = {
   curve?: number
   /** Text size, world units. Only meaningful on a note — see Note.font. */
   font?: number
+  /**
+   * Whole-object text marks. Spread in rather than nested so a style entry's before/after
+   * stay a flat patch — the applier writes keys onto the object and would otherwise need
+   * to know that one of them is a sub-object.
+   *
+   * `undefined` is a meaningful value here, not a missing one: toggling Bold off has to
+   * record `bold: undefined` in `after` so undo can put it back. See applyStyle.
+   */
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  list?: boolean
+  align?: TextAlign
 }
 
 export type Entry =

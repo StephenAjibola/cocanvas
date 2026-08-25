@@ -84,6 +84,8 @@ import {
   translateObject,
   visualBounds,
 } from "@/lib/objects"
+import { BULLET, fontString } from "@/lib/text-format"
+import { ADD_SIZE, addBoxFor, hitsAdd, newCardFor, sectionsOf } from "@/lib/sections"
 import {
   type PlacedShape,
   arrowHead,
@@ -125,6 +127,7 @@ import { SyncBadge } from "@/components/SyncBadge"
 import { ExportButton } from "@/components/ExportButton"
 import { Toolbar, type Tool } from "@/components/Toolbar"
 import { SelectionPanel } from "@/components/SelectionPanel"
+import { TextToolbar } from "@/components/TextToolbar"
 import { ContextMenu, type MenuItem } from "@/components/ContextMenu"
 import { BoardTitle } from "@/components/BoardTitle"
 import { BoardMenu } from "@/components/BoardMenu"
@@ -517,6 +520,10 @@ export function BoardCanvas({
     toolRef.current = tool
     const c = canvasRef.current
     if (c) c.style.cursor = tool === "select" ? "default" : "crosshair"
+    // The canvas now paints something that depends on the armed tool — the columns'
+    // quick-add "+", which only shows under Select. Without this the buttons appear a
+    // frame late, whenever the next unrelated repaint happens to come along.
+    redrawRef.current()
   }, [tool])
 
   useEffect(() => {
@@ -662,7 +669,26 @@ export function BoardCanvas({
       })
   }
 
-  function updateSelected(patch: StylePatch) {
+  /**
+   * The object a style patch applies to, by id.
+   *
+   * Split out of updateSelected because the text toolbar formats whatever is being
+   * EDITED, which is not always what `selected` points at — and a second copy of the
+   * before-snapshot rules is exactly the kind of duplication that drifts until undo
+   * stops restoring one of the fields.
+   */
+  /**
+   * What the text toolbar formats: whatever is open in the editor, or the selection.
+   *
+   * The editor wins because reaching for Bold mid-sentence must not require clicking
+   * out of the words being typed — and while editing, the selection can legitimately be
+   * pointing somewhere else.
+   */
+  const textTarget =
+    (editing && objectsRef.current.find((o) => o.id === editing.id)) || selected || null
+
+  function updateObject(id: string, patch: StylePatch) {
+    const selected = objectsRef.current.find((o) => o.id === id)
     if (!selected) return
     // Snapshot the scalars being replaced BEFORE the assign. Storing `selected` itself
     // would store a reference that mutates along with the document, and undo would
@@ -693,6 +719,14 @@ export function BoardCanvas({
     if (patch.font !== undefined && selected.type === "note") {
       before.font = selected.font ?? NOTE_FONT
     }
+    // Presence, not value, for every mark: toggling Bold OFF sends `bold: undefined`,
+    // and a !== undefined test would skip the snapshot and leave undo unable to switch
+    // it back on. Same rule `fill`, `dash` and `curve` already follow.
+    if (selected.type === "note" || selected.type === "stroke") {
+      for (const k of ["bold", "italic", "underline", "list", "align"] as const) {
+        if (k in patch) (before as Record<string, unknown>)[k] = selected[k]
+      }
+    }
     historyRef.current!.push({ kind: "style", id: selected.id, before, after: { ...patch } })
     touchRef.current(selected.id)
     // Mutated in place — the draw loop holds this exact object, so this is all it
@@ -708,6 +742,11 @@ export function BoardCanvas({
     }
     commit()
     redrawRef.current()
+  }
+
+  /** The panel's entry point: same rules, applied to the current selection. */
+  function updateSelected(patch: StylePatch) {
+    if (selected) updateObject(selected.id, patch)
   }
 
   /** Adds a fresh object to the top of the board and selects it. */
@@ -1197,6 +1236,7 @@ export function BoardCanvas({
       )
       drawGrid()
       drawObjects()
+      drawSectionAdds()
       drawLasers()
       drawSelection()
       drawConnecting()
@@ -1330,11 +1370,18 @@ export function BoardCanvas({
       const a = o.angle ?? 0
       el.style.transformOrigin = "top left"
       el.style.transform = a ? `rotate(${a}rad)` : ""
+      // Width and padding split the same way the painter splits them, so the editor
+      // wraps at the identical inner width and the words do not reflow on blur.
       el.style.width = `${box.w * s}px`
+      el.style.paddingLeft = `${box.indent * s}px`
+      el.style.boxSizing = "border-box"
       el.style.fontSize = `${box.font * s}px`
       el.style.lineHeight = `${box.lineHeight * s}px`
       el.style.color = box.ink
       el.style.textAlign = box.align
+      el.style.fontWeight = box.marks.bold ? "600" : "400"
+      el.style.fontStyle = box.marks.italic ? "italic" : "normal"
+      el.style.textDecoration = box.marks.underline ? "underline" : "none"
 
       // Local top of the text block, before rotation.
       let localTop = box.y
@@ -1345,8 +1392,8 @@ export function BoardCanvas({
         // is measured through the SAME wrap the canvas uses rather than by reading
         // scrollHeight — a layout read here would force a reflow on every pan frame,
         // and this way the editor and the painted text agree by construction.
-        ctx.font = `${box.font}px ${TEXT_FONT_FAMILY}`
-        const lines = wrapText(el.value, box.w, (t) => ctx.measureText(t).width)
+        ctx.font = fontString(box.font, TEXT_FONT_FAMILY, box.marks)
+        const lines = wrapText(el.value, box.w - box.indent, (t) => ctx.measureText(t).width)
         const content = Math.min(Math.max(lines.length, 1) * box.lineHeight, box.h)
         el.style.height = `${content * s}px`
         localTop = box.y + (box.h - content) / 2
@@ -1365,13 +1412,17 @@ export function BoardCanvas({
      * never drift apart in wrapping, font or alignment.
      */
     function drawLabel(o: BoardObject) {
-      // The live textarea sits exactly here — painting as well would double the text up,
-      // one copy a frame behind the other.
-      if (o.id === editingIdRef.current) return
+      const editingThis = o.id === editingIdRef.current
       const text = textOf(o)
-      if (!text) return
+      // A bulleted object still paints its BULLETS while its text is being edited: the
+      // textarea is transparent and renders no markers of its own, so without this the
+      // dots blink out for the whole edit and reappear on blur. The text itself is
+      // still skipped — the live textarea sits exactly here, and painting it too would
+      // double it up, one copy a frame behind the other.
+      if (!text && !editingThis) return
       const box = textBoxFor(o, themeRef.current)
       if (!box) return
+      if (editingThis && !box.marks.list) return
 
       const b = objectBounds(o)
       ctx.save()
@@ -1380,23 +1431,99 @@ export function BoardCanvas({
       ctx.beginPath()
       ctx.rect(b.minX, b.minY, b.maxX - b.minX, b.maxY - b.minY)
       ctx.clip()
-      ctx.font = `${box.font}px ${TEXT_FONT_FAMILY}`
+      ctx.font = fontString(box.font, TEXT_FONT_FAMILY, box.marks)
       ctx.fillStyle = box.ink
       ctx.textBaseline = "top"
-      ctx.textAlign = box.align === "center" ? "center" : "left"
+      ctx.textAlign = box.align
 
-      const lines = wrapText(text, box.w, (t) => ctx.measureText(t).width)
+      // The bullet column is taken out of the wrap width, not added on top of it, or
+      // the text would run past the edge it is inset from.
+      const inner = box.w - box.indent
+      const source = editingThis ? textareaRef.current?.value ?? text : text
+      const lines = wrapText(source, inner, (t) => ctx.measureText(t).width)
       const top =
         box.valign === "middle"
           ? box.y + (box.h - lines.length * box.lineHeight) / 2
           : box.y
-      const x = box.align === "center" ? box.x + box.w / 2 : box.x
-      lines.forEach((line, i) => ctx.fillText(line, x, top + i * box.lineHeight))
+      const left = box.x + box.indent
+      const x =
+        box.align === "center" ? left + inner / 2 : box.align === "right" ? left + inner : left
+
+      lines.forEach((line, i) => {
+        const ly = top + i * box.lineHeight
+        if (box.marks.list) {
+          // Bullets hang in the indent column at the box's own left edge, so they line
+          // up with each other whatever the text alignment does inside.
+          const prev = ctx.textAlign
+          ctx.textAlign = "left"
+          ctx.fillText(BULLET, box.x, ly)
+          ctx.textAlign = prev
+        }
+        if (editingThis) return // bullets only; the textarea is drawing the words
+        ctx.fillText(line, x, ly)
+
+        if (box.marks.underline) {
+          // Measured per line rather than ruled across the box: an underline that runs
+          // past the last word reads as a strikethrough on the empty half of a centred
+          // line.
+          const wLine = ctx.measureText(line).width
+          if (!wLine) return
+          const x0 =
+            box.align === "center" ? x - wLine / 2 : box.align === "right" ? x - wLine : x
+          // Below the baseline of a top-baseline draw, and scaled off the font so it
+          // stays proportional rather than hairline at 40px.
+          const uy = ly + box.font * 1.08
+          ctx.fillRect(x0, uy, wLine, Math.max(box.font * 0.06, 0.5))
+        }
+      })
       ctx.restore()
     }
 
     // Drawn in world space like everything else, so it tracks the object through pan
     // and zoom for free. Widths are divided by scale to stay constant on screen.
+    /**
+     * The "+" at the foot of each column.
+     *
+     * Drawn after the objects so it sits on top of its own lane, and sized in SCREEN px
+     * converted to world units so it stays the same size at any zoom — the same rule the
+     * selection handles and connector grips follow.
+     *
+     * Hidden in read-only mode and while a tool that draws is armed: a "+" you cannot
+     * press, or that competes with the drag you were about to start, is worse than none.
+     */
+    function drawSectionAdds() {
+      if (readOnlyRef.current) return
+      if (toolRef.current !== "select") return
+      const size = ADD_SIZE / view.scale
+      for (const lane of sectionsOf(objects)) {
+        const a = addBoxFor(lane, size)
+        const cx = a.x + a.w / 2
+        const cy = a.y + a.h / 2
+        const r = size / 2
+        const arm = size * 0.26
+
+        ctx.save()
+        ctx.beginPath()
+        ctx.arc(cx, cy, r, 0, Math.PI * 2)
+        ctx.fillStyle = paint.addFill
+        ctx.fill()
+        ctx.strokeStyle = paint.addEdge
+        ctx.lineWidth = 1 / view.scale
+        ctx.stroke()
+
+        ctx.beginPath()
+        ctx.moveTo(cx - arm, cy)
+        ctx.lineTo(cx + arm, cy)
+        ctx.moveTo(cx, cy - arm)
+        ctx.lineTo(cx, cy + arm)
+        ctx.strokeStyle = paint.addInk
+        ctx.lineWidth = 1.6 / view.scale
+        ctx.lineCap = "round"
+        ctx.stroke()
+        ctx.restore()
+      }
+    }
+
     function drawSelection() {
       const s = objects.find((x) => x.id === selectedIdRef.current)
       if (!s) return
@@ -2209,6 +2336,35 @@ export function BoardCanvas({
       // under the cursor takes it; empty canvas deselects and falls through to a pan.
       if (!forcePan && e.button === 0 && toolRef.current === "select") {
         const p = toWorld(e)
+
+        /**
+         * Quick-add, tested BEFORE the normal hit test.
+         *
+         * The "+" is painted on top of its lane, so a press that lands on it must not
+         * fall through and select the lane underneath — which is what would happen if
+         * this ran after pickObject.
+         */
+        const addSize = ADD_SIZE / view.scale
+        const lane = sectionsOf(objects).find((l) => hitsAdd(l, p.x, p.y, addSize))
+        if (lane) {
+          e.preventDefault()
+          const card = newCardFor(objects, lane)
+          if (card) {
+            card.id = crypto.randomUUID()
+            card.createdAt = Date.now()
+            objects.push(card)
+            touch(card.id)
+            history.push({ kind: "add", object: card, index: objects.length - 1 })
+            commit()
+            setSelected(card)
+            // Open for typing straight away: the point of the button is to add a card
+            // and write on it, and making that two gestures gives back the friction it
+            // exists to remove.
+            setEditing({ id: card.id, text: "" })
+            requestDraw()
+          }
+          return
+        }
 
         // Handles win over the object underneath them: they sit on and just outside the
         // selection's edge, so picking first would make a corner grip unreachable.
@@ -3226,12 +3382,31 @@ export function BoardCanvas({
           }
         />
       )}
-      {selected && (
+      {/* One formatting bar for every text-bearing object, shown while it is selected
+          OR mid-edit — reaching for Bold should not first mean clicking out of the words
+          you are typing. `textTarget` is the edited object when there is one, so the bar
+          keeps formatting what has focus. */}
+      {textTarget && isLabelable(textTarget) && (
+        <TextToolbar
+          // Prefixed, because SelectionPanel is a sibling keyed the same way and can be
+          // showing for the SAME object — two children under one parent carrying the
+          // identical key is a React duplicate-key error.
+          key={`text:${textTarget.id}:${hist.ver}`}
+          object={textTarget}
+          onChange={(patch) => updateObject(textTarget.id, patch)}
+          theme={theme}
+        />
+      )}
+      {selected && !(selected.type === "note" && selected.bare) && (
         // key remounts the panel per selection, so its inputs re-seed from the
         // newly selected object instead of holding the previous one's values. hist.ver
         // does the same after an undo or redo moved the object out from under them.
+        //
+        // A free TEXT BOX is excluded: colour and size moved into TextToolbar, which
+        // leaves the panel with nothing but Delete — and Delete already has the key and
+        // the context menu. A 224px panel holding one button is not a panel.
         <SelectionPanel
-          key={`${selected.id}:${hist.ver}`}
+          key={`panel:${selected.id}:${hist.ver}`}
           object={selected}
           onChange={updateSelected}
           onDelete={deleteSelected}

@@ -43,5 +43,15 @@ export function canvasTokens() {
     muted: cssVar("--paper-500", "#9ba6c6"),
     /** Alignment guides. The interaction pink, so a guide reads as the app talking. */
     guide: cssVar("--pink-400", "#e87ba8"),
+    /**
+     * The quick-add "+" on a column.
+     *
+     * A white chip with a hairline edge and the accent for the cross: it has to read as
+     * a CONTROL sitting on the board rather than as another card, and the templates it
+     * appears on are all pale lanes where a filled accent circle would shout.
+     */
+    addFill: cssVar("--surface-container-lowest", "#ffffff"),
+    addEdge: cssVar("--outline-variant", "#cbd5e1"),
+    addInk: cssVar("--primary", "#7F00FF"),
   }
 }

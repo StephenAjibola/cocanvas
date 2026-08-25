@@ -13,6 +13,13 @@ import {
 import { readableInk } from "./contrast.ts"
 import { THEMES, type Theme } from "./theme.ts"
 import { type ImageObject } from "./images.ts"
+import {
+  type TextAlign,
+  type TextMarks,
+  marksOf,
+  normalizeAlign,
+  textIndent,
+} from "./text-format.ts"
 
 /**
  * Everything that can live on a board.
@@ -444,8 +451,17 @@ export type TextBox = {
   font: number
   lineHeight: number
   ink: string
-  align: "left" | "center"
+  align: TextAlign
   valign: "top" | "middle"
+  /**
+   * The object's whole-object marks, carried through so the canvas painter and the
+   * editing textarea format from the SAME derivation they already share for position,
+   * size and ink. Deriving them separately is how bold text ends up reflowing the
+   * instant you blur.
+   */
+  marks: TextMarks
+  /** Left offset for the bullet column, already folded out of `w`. */
+  indent: number
 }
 
 /**
@@ -480,6 +496,7 @@ export function textBoxFor(o: BoardObject, theme: Theme): TextBox | null {
   if (o.type === "note") {
     const pad = o.bare ? TEXT_PADDING : NOTE_PADDING
     const font = o.font ?? NOTE_FONT
+    const marks = marksOf(o)
     return {
       x: o.x + pad,
       y: o.y + pad,
@@ -491,11 +508,16 @@ export function textBoxFor(o: BoardObject, theme: Theme): TextBox | null {
       // derives readable ink from its own fill; a text box has no fill, so the chosen
       // color IS the ink.
       ink: o.bare ? o.color : inkFor(o.color),
-      align: "left",
+      // The object's own alignment wins; a note that has never been aligned keeps the
+      // left it always had.
+      align: normalizeAlign(o.align, "left"),
       valign: "top",
+      marks,
+      indent: textIndent(font, marks),
     }
   }
 
+  const marks = marksOf(o)
   const b = strokeBounds(o)
   const cx = (b.minX + b.maxX) / 2
   const cy = (b.minY + b.maxY) / 2
@@ -518,8 +540,12 @@ export function textBoxFor(o: BoardObject, theme: Theme): TextBox | null {
     ink: o.fill
       ? readableInk(o.color, o.fill, inkFor(o.fill))
       : readableInk(o.color, t.bg, t.stroke),
-    align: "center",
+    // A label has always been centred, so that stays its default — but an explicit
+    // choice overrides it, same as on a note.
+    align: normalizeAlign(o.align, "center"),
     valign: "middle",
+    marks,
+    indent: textIndent(LABEL_FONT, marks),
   }
 }
 

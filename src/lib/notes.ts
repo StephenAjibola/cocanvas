@@ -9,6 +9,7 @@
  */
 
 import { contrastRatio } from "./contrast.ts"
+import type { TextMarks } from "./text-format.ts"
 
 export type Note = {
   id: string
@@ -55,7 +56,17 @@ export type Note = {
    * has to be a field rather than baked into the geometry.
    */
   angle?: number
-}
+} & TextMarks
+
+/**
+ * Formatting applies to the WHOLE object's text, and is spread onto both text-bearing
+ * types rather than living on a shared base.
+ *
+ * Note and Stroke are different shapes that happen to share a string; giving them a
+ * common ancestor to hold five optional booleans would be a type hierarchy invented for
+ * the convenience of the toolbar rather than for anything either type is. See
+ * lib/text-format.ts for why the marks are whole-object.
+ */
 
 /** Placed at a fixed size rather than dragged out — a sticky is a sticky. */
 export const NOTE_SIZE = 160
