@@ -43,3 +43,15 @@
     "typescript": "^5"
   }
 }
+"scripts": {
+  "dev": "next dev",
+  "build": "next build",
+  "postinstall": "prisma generate"
+}
+"allowScripts": {
+  "prisma": true,
+  "@prisma/engines": true,
+  "core-js": true,
+  "sharp": true,
+  "unrs-resolver": true
+}
