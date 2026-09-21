@@ -52,7 +52,7 @@ export function DashboardHeader({
   return (
     <header className="flex items-center gap-3 border-b border-outline-variant px-6 py-3">
       <form onSubmit={submit} className="max-w-md flex-1">
-        <label className="flex items-center gap-2 rounded-full border border-outline-variant bg-surface-container-low px-4 py-2 transition-colors focus-within:border-primary">
+        <label className="flex items-center gap-2 rounded-full border border-outline-variant bg-surface-container-lowest px-4 py-2 transition-colors focus-within:border-primary">
           <Glyph>
             <circle cx="11" cy="11" r="7" />
             <path d="M20 20l-3.5-3.5" />

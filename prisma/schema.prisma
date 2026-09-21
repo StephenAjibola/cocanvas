@@ -23,6 +23,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   invitesSent         WorkspaceInvite[]
   starredBoards       StarredBoard[]
+  boardViews          BoardView[]
   comments            Comment[]
 }
 
@@ -213,6 +214,7 @@ model Board {
   workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   objects     BoardObject[]
   starredBy   StarredBoard[]
+  views       BoardView[]
   comments    Comment[]
 
   @@index([workspaceId])
@@ -239,6 +241,38 @@ model StarredBoard {
   board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
 
   @@id([userId, boardId])
+  @@index([boardId])
+}
+
+/**
+ * One row per (user, board) recording when that user last OPENED the board — what backs
+ * the dashboard's "Recent" strip and the sidebar's Recent view.
+ *
+ * Distinct from Board.updatedAt, which is the last EDIT by anyone. The two answer
+ * different questions and were being conflated: sorting by updatedAt meant a colleague
+ * editing overnight pushed a board to the top of YOUR Recent, a board you had never
+ * opened. Recent is a record of your attention, not the workspace's activity.
+ *
+ * Per-user for the same reason StarredBoard is, and the mistake to avoid is the same: a
+ * lastViewedAt COLUMN on Board is one timestamp shared by every member, so it could only
+ * ever say "somebody looked at this", which is not the question the dashboard asks.
+ *
+ * viewedAt is @updatedAt, so the upsert on board open needs no explicit timestamp — the
+ * composite id makes re-opening the same board a write to the same row rather than a
+ * growing history. This is deliberately NOT an access log: only the most recent open
+ * survives, because that is all "Recent" needs and anything more is data nobody asked to
+ * keep.
+ */
+model BoardView {
+  userId   String
+  boardId  String
+  viewedAt DateTime @updatedAt
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  board    Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@id([userId, boardId])
+  // Recent is always "this user's rows, newest first" — the index is that query.
+  @@index([userId, viewedAt])
   @@index([boardId])
 }
 

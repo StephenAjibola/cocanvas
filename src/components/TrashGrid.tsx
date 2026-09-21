@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 
 type TrashedBoard = { id: string; name: string; deletedAt: Date }
 
@@ -8,40 +9,40 @@ type TrashedBoard = { id: string; name: string; deletedAt: Date }
  * Trash view — Restore and Delete Forever are the only actions, both visible rather
  * than tucked in a menu since there are only two of them. No "Open": the board page
  * 404s a trashed board until it's restored, so a link here would just be a dead end.
+ *
+ * Renders straight from the prop, NOT from a useState copy of it. The copy read as a
+ * harmless optimistic-UI trick and was the reason "Clear Trash" looked like a dead
+ * button: that dialog empties the Trash and calls router.refresh(), the server sends
+ * this component an empty `boards`, and a useState initialiser ignores every prop after
+ * the first — so the deleted boards stayed on screen with nothing to say they were gone.
+ * Anything that changes the Trash from outside this component hit the same wall.
  */
-export function TrashGrid({ boards: initial }: { boards: TrashedBoard[] }) {
-  const [boards, setBoards] = useState(initial)
+export function TrashGrid({ boards }: { boards: TrashedBoard[] }) {
   const [busy, setBusy] = useState<string | null>(null)
+  const router = useRouter()
 
-  async function restore(id: string) {
+  async function act(id: string, run: () => Promise<Response>) {
     setBusy(id)
-    const prior = boards
-    setBoards((bs) => bs.filter((b) => b.id !== id))
     try {
-      const res = await fetch(`/api/board/${id}/restore`, { method: "POST" })
-      if (!res.ok) throw new Error(`restore failed: ${res.status}`)
+      const res = await run()
+      if (!res.ok) throw new Error(`${res.status}`)
+      // The server owns the list now, so a refresh is the whole update — and it is the
+      // same path Clear Trash takes, which means one of them working proves both.
+      router.refresh()
     } catch (err) {
-      console.error("Board restore failed:", err)
-      setBoards(prior)
+      console.error("Trash action failed:", err)
+      window.alert("That didn't work. Nothing was changed.")
     } finally {
       setBusy(null)
     }
   }
 
-  async function purge(id: string) {
+  const restore = (id: string) =>
+    act(id, () => fetch(`/api/board/${id}/restore`, { method: "POST" }))
+
+  const purge = (id: string) => {
     if (!window.confirm("Permanently delete this board? This can't be undone.")) return
-    setBusy(id)
-    const prior = boards
-    setBoards((bs) => bs.filter((b) => b.id !== id))
-    try {
-      const res = await fetch(`/api/board/${id}/purge`, { method: "DELETE" })
-      if (!res.ok) throw new Error(`purge failed: ${res.status}`)
-    } catch (err) {
-      console.error("Board purge failed:", err)
-      setBoards(prior)
-    } finally {
-      setBusy(null)
-    }
+    return act(id, () => fetch(`/api/board/${id}/purge`, { method: "DELETE" }))
   }
 
   if (!boards.length) {

@@ -1,11 +1,13 @@
 "use client"
 
 import Link from "next/link"
+import { motion } from "framer-motion"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { ContextMenu, type MenuItem } from "@/components/ContextMenu"
 import { BoardThumbnail } from "@/components/BoardThumbnail"
 import { THEMES, isTheme } from "@/lib/theme"
+import { RISE_GRID, RISE_ITEM } from "@/lib/motion"
 
 type BoardRow = {
   id: string
@@ -148,7 +150,12 @@ export function BoardGrid({
           real board thumbnails once PNG export ships — the shape is sized for the render
           that is coming, so swapping the placeholder out is a content change, not a
           relayout. */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <motion.div
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+        variants={RISE_GRID}
+        initial="hidden"
+        animate="show"
+      >
         {boards.map((b) => {
           // Interim placeholder, not a design.
           //
@@ -189,13 +196,16 @@ export function BoardGrid({
             </p>
           )
           return (
-            <div
+            // motion.div rather than a wrapper AROUND the card: an extra element here
+            // would become the grid cell and the card would stop stretching to it.
+            <motion.div
               key={b.id}
+              variants={RISE_ITEM}
               onContextMenu={(e) => {
                 e.preventDefault()
                 setMenu({ x: e.clientX, y: e.clientY, boardId: b.id })
               }}
-              className="group relative overflow-hidden rounded-lg border border-outline-variant bg-surface-container-lowest transition-shadow hover:shadow-md"
+              className="group relative overflow-hidden rounded-lg border border-outline-variant bg-surface-container-lowest shadow-1 transition-shadow hover:shadow-1-hover"
             >
               {renaming === b.id ? (
                 <div>
@@ -267,7 +277,7 @@ export function BoardGrid({
                   </button>
                 </>
               )}
-            </div>
+            </motion.div>
           )
         })}
 
@@ -286,7 +296,7 @@ export function BoardGrid({
             type="button"
             disabled
             title="Importing isn't wired up yet — no board file format, and image upload needs BLOB_READ_WRITE_TOKEN"
-            className="flex h-full min-h-[13rem] w-full cursor-not-allowed flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-outline-variant text-on-surface-variant opacity-60"
+            className="flex h-full min-h-[13rem] w-full cursor-not-allowed flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-outline text-on-surface-variant opacity-60"
           >
             <span
               aria-hidden
@@ -302,7 +312,7 @@ export function BoardGrid({
             <span className="font-mono text-label-mono uppercase text-on-surface-variant">Soon</span>
           </button>
         )}
-      </div>
+      </motion.div>
       {menu && (
         <ContextMenu
           x={menu.x}

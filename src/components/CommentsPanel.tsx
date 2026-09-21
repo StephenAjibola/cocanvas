@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { numberThreads } from "@/lib/pins"
+import { motion } from "framer-motion"
 
 export const COMMENTS_PANEL_WIDTH = 340
 
@@ -207,7 +208,17 @@ export function CommentsPanel({
   }
 
   return (
-    <aside
+    <motion.aside
+      /**
+       * Slides in from its own edge rather than scaling: this is a drawer attached to the
+       * right side of the window, and a panel that grows from its centre reads as a
+       * dialog that happens to be tall. x, not width — animating width would relayout
+       * every comment in the list on every frame.
+       */
+      initial={{ x: COMMENTS_PANEL_WIDTH, opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      exit={{ x: COMMENTS_PANEL_WIDTH, opacity: 0 }}
+      transition={{ duration: 0.2, ease: "easeOut" }}
       // Fixed to the right edge. The canvas is inset by the same width, so the two meet
       // exactly and neither overlaps the other.
       style={{ width: COMMENTS_PANEL_WIDTH }}
@@ -402,6 +413,6 @@ export function CommentsPanel({
           )}
         </div>
       )}
-    </aside>
+    </motion.aside>
   )
 }

@@ -22,9 +22,26 @@ export default async function BoardPage({
       user: { email: user.email! },
       workspace: { boards: { some: { id: boardId, deletedAt: null } } },
     },
-    select: { role: true },
+    // userId comes back with the role so the view can be recorded without a second
+    // lookup — this query already had to resolve which user is asking.
+    select: { role: true, userId: true },
   })
   if (!membership) notFound()
+
+  /**
+   * Record the open. This — not Board.updatedAt — is what "Recent" is sorted by: the
+   * dashboard is showing you what YOU last looked at, and a board a colleague edited
+   * overnight is not something you looked at.
+   *
+   * One row per (user, board), overwritten on every open rather than appended to. Recent
+   * only ever needs the latest timestamp, and keeping a history would be building an
+   * access log nobody asked for.
+   */
+  await prisma.boardView.upsert({
+    where: { userId_boardId: { userId: membership.userId, boardId } },
+    create: { userId: membership.userId, boardId },
+    update: { viewedAt: new Date() },
+  })
 
   const board = await prisma.board.findUnique({
     where: { id: boardId },

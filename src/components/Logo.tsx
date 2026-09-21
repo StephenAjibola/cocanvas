@@ -1,48 +1,93 @@
-import Image from "next/image"
-import mark from "../../public/cocanvas-logo.png"
+import Link from "next/link"
 
 export function Logo({
   variant,
+  mark = true,
+  wordmark = true,
+  href,
   className = "",
 }: {
   variant: "light" | "dark"
+  /**
+   * Whether to draw the swirl beside the wordmark.
+   *
+   * On by default, including in the sidebar — it was dropped there once for competing
+   * with the workspace name below it, and asked for back, so the header now carries the
+   * same lockup as the auth pages and the tab icon. The prop stays because the board
+   * header still wants the mark WITHOUT the wordmark (see `wordmark`).
+   */
+  mark?: boolean
+  /**
+   * Whether to draw the "CoCanvas" text. False leaves the mark alone — the board header
+   * is a tight bar where the board's own name is the identity that matters, so the
+   * product only needs its glyph there.
+   */
+  wordmark?: boolean
+  /**
+   * Makes the whole lockup a link. Supplied as /dashboard wherever the logo doubles as
+   * the way home, which is the behaviour every app trains people to expect of it; left
+   * undefined on the auth pages, where there is no "home" to go to yet.
+   */
+  href?: string
   className?: string
 }) {
   /**
-   * The CoCanvas mark, rendered from the supplied artwork.
+   * The CoCanvas mark and wordmark.
    *
-   * This is the actual PNG, imported as a static asset — NOT a redrawn vector. An earlier
-   * pass approximated it as a circle plus one arc, which lost the interlaced double-swirl
-   * entirely and was the wrong call: a brand mark is artwork to reproduce, not a shape to
-   * paraphrase.
+   * The mark is the swirl ALONE — the blue badge ground it shipped on has been keyed out
+   * and the shape re-fills as flat black or flat white, so it sits on whatever surface it
+   * lands on instead of carrying a square of brand colour around with it. Both variants
+   * come off one alpha mask, so they are the same shape at the same weight, and neither
+   * has a single pixel of the original blue in it. See scripts/build-logo.py — re-run it
+   * if the source artwork is ever replaced.
    *
-   * Importing the file (rather than referencing "/cocanvas-logo.png" by string) is what
-   * gives next/image the intrinsic dimensions at build time, so the layout box is known
-   * before the bytes arrive and the sidebar cannot shift as it loads.
+   * `variant` names the SURFACE, not the ink: on a light surface the mark is black and
+   * the wordmark is dark; on a dark one both go white.
    *
-   * ONE mark, no light/dark variants: the badge carries its own blue ground, so it needs
-   * no adaptation and must not be given any. `variant` therefore only decides the colour
-   * of the WORDMARK beside it, which is type and does have to stay legible on both
-   * grounds.
+   * Plain <img> with a srcSet rather than next/image, because the three sizes are already
+   * rendered as real files — resampled from the 1024px master, not scaled by the browser.
+   * There is nothing left for the image pipeline to optimise, and width/height on the tag
+   * reserves the box just as well.
    */
-  const wordmark = variant === "light" ? "text-on-surface" : "text-inverse-on-surface"
+  const ink = variant === "light" ? "black" : "white"
 
-  return (
-    <div className={`flex items-center gap-2.5 ${className}`}>
-      <Image
-        src={mark}
+  const shell = `flex items-center gap-2.5 ${className}`
+  const inner = (
+    <>
+      {mark && (
+      /* eslint-disable-next-line @next/next/no-img-element -- the rule is about
+         unoptimised photography; this is a 1.5KB mark that is already emitted at every
+         size it renders at, so there is nothing for the optimiser to do. */
+      <img
+        src={`/cocanvas-mark-${ink}-36.png`}
+        srcSet={`/cocanvas-mark-${ink}-36.png 1x, /cocanvas-mark-${ink}-72.png 2x, /cocanvas-mark-${ink}-108.png 3x`}
         alt=""
         width={36}
         height={36}
-        // The mark is decorative next to the wordmark, which already says "CoCanvas" —
-        // alt="" keeps a screen reader from announcing the name twice.
+        // Decorative next to the wordmark, which already says "CoCanvas" — alt="" keeps a
+        // screen reader from announcing the name twice.
         aria-hidden="true"
-        // Above the fold on every authenticated page, so it should not wait for lazy
-        // loading to notice it.
-        priority
-        className="rounded"
       />
-      <span className={`text-xl font-semibold tracking-tight ${wordmark}`}>CoCanvas</span>
-    </div>
+      )}
+      {wordmark && (
+        <span
+          className={`text-xl font-semibold tracking-tight ${
+            variant === "light" ? "text-on-surface" : "text-inverse-on-surface"
+          }`}
+        >
+          CoCanvas
+        </span>
+      )}
+    </>
+  )
+
+  // Branching on the element rather than on a dynamic tag: `<Tag href={maybe}>` cannot
+  // be typed, and the shared `inner` already guarantees the two render the same lockup.
+  return href ? (
+    <Link href={href} className={`${shell} rounded transition-opacity hover:opacity-80`}>
+      {inner}
+    </Link>
+  ) : (
+    <div className={shell}>{inner}</div>
   )
 }

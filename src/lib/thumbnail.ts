@@ -1,5 +1,6 @@
 import type { BoardObject } from "./objects.ts"
 import { visualBounds } from "./objects.ts"
+import { NOTE_RADIUS, NOTE_SHADOW } from "./notes.ts"
 
 /**
  * Board thumbnails, rendered in the browser from the board's own objects.
@@ -128,10 +129,22 @@ export function renderThumbnail(
     if (o.type === "note") {
       ctx.fillStyle = o.color
       ctx.beginPath()
-      // Radius in DESTINATION pixels, so it stays a crisp 2px hint at any board scale
+      // Radius in DESTINATION pixels, so it stays a crisp corner at any board scale
       // rather than shrinking to nothing on a zoomed-out board.
-      ctx.roundRect(o.x, o.y, o.w, o.h, 2 / t.scale)
-      ctx.fill()
+      ctx.roundRect(o.x, o.y, o.w, o.h, NOTE_RADIUS / t.scale)
+      if (o.bare) {
+        ctx.fill() // a text box: the dark block stands in for its words, no paper
+      } else {
+        // Same Level 1 shadow the board paints. Shadows ignore the transform, so these
+        // are device px — dpr, not the board scale.
+        for (const sh of NOTE_SHADOW) {
+          ctx.shadowColor = `rgba(0,0,0,${sh.alpha})`
+          ctx.shadowBlur = sh.blur * dpr
+          ctx.shadowOffsetY = sh.y * dpr
+          ctx.fill()
+        }
+        ctx.shadowColor = "transparent"
+      }
     } else if (o.type === "image") {
       // The bitmap itself is not loaded here — decoding N images to draw them at 40px
       // would cost more than the whole thumbnail is worth. A neutral block in the right

@@ -5,9 +5,12 @@ import { motion } from "framer-motion"
 import type { Viewport } from "@/lib/viewport"
 import {
   MaterialIcon,
+  M_FIT_SCREEN,
   M_PAN_TOOL,
   M_REDO,
   M_UNDO,
+  M_VISIBILITY,
+  M_VISIBILITY_OFF,
   M_ZOOM_IN,
   type Tool,
 } from "@/components/Toolbar"
@@ -36,7 +39,8 @@ export function BottomPill({
   onZoom,
   onZoomTo,
   onZoomToFit,
-  onHideUI,
+  hideUI,
+  onHideUIChange,
   canUndo,
   canRedo,
   onUndo,
@@ -49,7 +53,9 @@ export function BottomPill({
   /** Jump to an absolute scale, anchored on the canvas centre. 1 is 100%. */
   onZoomTo: (scale: number) => void
   onZoomToFit: () => void
-  onHideUI: () => void
+  /** Whether the chrome is currently hidden, so the eye can show the way back. */
+  hideUI: boolean
+  onHideUIChange: (next: boolean) => void
   canUndo: boolean
   canRedo: boolean
   onUndo: () => void
@@ -93,12 +99,40 @@ export function BottomPill({
     { label: "Zoom to 200%", onSelect: () => onZoomTo(2) },
     { label: "Zoom to 100%", shortcut: "Ctrl+0", onSelect: () => onZoomTo(1) },
     { label: "Zoom to 50%", onSelect: () => onZoomTo(0.5) },
-    { label: "Hide interface", shortcut: "Ctrl+\\", onSelect: onHideUI },
+    { label: "Hide interface", shortcut: "Ctrl+\\", onSelect: () => onHideUIChange(true) },
   ]
 
   /** Shared shell so the four cells line up whatever they do when pressed. */
   const cell =
     "flex flex-col items-center gap-0.5 rounded-xl px-3 py-1 transition-colors active:scale-95"
+
+  /* The eye is the way BACK, which is the whole reason it is a button rather than only
+     a menu row: once the chrome is hidden there is nothing left on screen to tell you
+     Ctrl+\ exists. With hideUI on, the pill collapses to this one control — the canvas
+     is clear, but the way back is still visible. */
+  const eye = (
+    <motion.button
+      type="button"
+      onClick={() => onHideUIChange(!hideUI)}
+      aria-label={hideUI ? "Show interface" : "Hide interface"}
+      aria-pressed={hideUI}
+      title={`${hideUI ? "Show" : "Hide"} interface (Ctrl+\\)`}
+      whileTap={{ scale: 0.95 }}
+      className={`${cell} ${
+        hideUI ? "bg-primary text-on-primary" : "text-on-surface-variant hover:text-on-surface"
+      }`}
+    >
+      <MaterialIcon path={hideUI ? M_VISIBILITY_OFF : M_VISIBILITY} size={20} />
+      <span className="text-[10px]">{hideUI ? "Show" : "Hide"}</span>
+    </motion.button>
+  )
+
+  if (hideUI)
+    return (
+      <div className="fixed bottom-6 left-1/2 z-30 -translate-x-1/2 rounded-full border border-outline-variant elevation-2 px-2 py-2 backdrop-blur-md">
+        {eye}
+      </div>
+    )
 
   return (
     <div
@@ -137,6 +171,20 @@ export function BottomPill({
         <MaterialIcon path={M_PAN_TOOL} size={20} />
         <span className="text-[10px]">Pan</span>
       </motion.button>
+
+      <motion.button
+        type="button"
+        onClick={onZoomToFit}
+        aria-label="Zoom to fit"
+        title="Zoom to fit (Ctrl+1)"
+        whileTap={{ scale: 0.95 }}
+        className={`${cell} text-on-surface-variant hover:text-on-surface`}
+      >
+        <MaterialIcon path={M_FIT_SCREEN} size={20} />
+        <span className="text-[10px]">Fit</span>
+      </motion.button>
+
+      {eye}
 
       <motion.button
         type="button"

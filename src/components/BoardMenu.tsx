@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { SettingsModal } from "@/components/SettingsModal"
 import { ShortcutsModal } from "@/components/ShortcutsModal"
+import { AnimatePresence } from "framer-motion"
 
 /**
  * The board's "..." menu, in the top header.
@@ -148,8 +149,13 @@ export function BoardMenu({
         )}
       </div>
 
-      {modal === "settings" && <SettingsModal onClose={() => setModal(null)} />}
-      {modal === "shortcuts" && <ShortcutsModal onClose={() => setModal(null)} />}
+      {/* AnimatePresence keeps the dialog mounted long enough to play its exit — without
+          it the panel is gone on the same frame the state clears, and only the entrance
+          would animate. */}
+      <AnimatePresence>
+        {modal === "settings" && <SettingsModal key="settings" onClose={() => setModal(null)} />}
+        {modal === "shortcuts" && <ShortcutsModal key="shortcuts" onClose={() => setModal(null)} />}
+      </AnimatePresence>
     </>
   )
 }

@@ -212,3 +212,41 @@ test("isBoardObject rejects what would crash the canvas", () => {
   no({ ...note("n"), w: null }, "a note needs real dimensions")
   no({ ...note("n"), text: undefined }, "a note's text is required, unlike a shape label")
 })
+
+/**
+ * The board now hydrates its objects array from the DATABASE snapshot at mount, instead
+ * of waiting for the realtime document to arrive. These two cover the seam that opens
+ * up: the same objects are then present on BOTH sides of the first sync.
+ *
+ * The bug being pinned down: with the relay unreachable, `sync` never fired, the array
+ * stayed empty, a freshly seeded template board rendered blank — and the next debounced
+ * save wrote that emptiness over the template's rows in Postgres.
+ */
+test("a hydrated board seeds an empty room without duplicating itself", () => {
+  const map = mkMap()
+  const initial: BoardObject[] = [stroke("a", 1), note("b", 2)]
+  // What BoardCanvas now does at mount: the array starts as the database's copy.
+  const objects: BoardObject[] = initial.map((o) => structuredClone(o))
+
+  // First client into the room: it seeds, then reconciles against what it just wrote.
+  assert.equal(seed(map, initial), true)
+  applyRemote(map, objects)
+
+  assert.equal(ids(objects), "a,b", "no second copy of anything")
+  assert.equal(readAll(map).length, 2)
+})
+
+test("a hydrated board defers to a room that has already moved on", () => {
+  const map = mkMap()
+  const initial: BoardObject[] = [stroke("a", 1), note("b", 2)]
+  const objects: BoardObject[] = initial.map((o) => structuredClone(o))
+
+  // A peer got here first, erased "a" and added "c". The live document wins over the
+  // snapshot this client loaded — seed() declines, and the array is brought into line.
+  map.set("b", note("b", 2))
+  map.set("c", stroke("c", 3))
+
+  assert.equal(seed(map, initial), false, "a non-empty room is never re-seeded")
+  applyRemote(map, objects)
+  assert.equal(ids(objects), "b,c", "the erased object does not come back from the DB copy")
+})

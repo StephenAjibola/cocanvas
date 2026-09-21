@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
+import { motion } from "framer-motion"
+import { DIALOG, SCRIM } from "@/lib/motion"
 
 /**
  * The dialog shell the board's Settings and Keyboard-shortcuts modals share.
@@ -109,7 +111,14 @@ export function Modal({
      * until the content exceeds it; tall content grows the inner box instead of
      * overflowing it, and the outer box scrolls to reach every part of the panel.
      */
-    <div
+    <motion.div
+      variants={SCRIM}
+      initial="hidden"
+      animate="show"
+      // `exit` only does anything when an <AnimatePresence> sits above the conditional
+      // that renders this dialog — see the call sites. Harmless where one does not, so a
+      // future modal still gets the entrance without having to wire anything.
+      exit="gone"
       className="fixed inset-0 z-[60] overflow-y-auto bg-ink-950/60 backdrop-blur-sm"
       // Closes on a press that lands anywhere outside the panel, across BOTH layers —
       // a target-identity check would only match whichever of the two was pressed. Using
@@ -120,7 +129,8 @@ export function Modal({
       }}
     >
       <div className="flex min-h-full items-center justify-center p-4">
-      <div
+      <motion.div
+        variants={DIALOG}
         ref={panelRef}
         role="dialog"
         aria-modal="true"
@@ -161,9 +171,9 @@ export function Modal({
           </button>
         </div>
         {children}
+      </motion.div>
       </div>
-      </div>
-    </div>,
+    </motion.div>,
     document.body,
   )
 }
@@ -207,7 +217,7 @@ export function Toggle({
         // Every Modal is tone="light" now, so the dark-chrome accent and ink track
         // that used to live here rendered a white label on a white panel.
         className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors ${
-          checked ? "bg-primary" : "bg-outline-variant"
+          checked ? "bg-primary" : "bg-surface-dim"
         }`}
       >
         <span

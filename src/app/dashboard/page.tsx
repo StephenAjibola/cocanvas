@@ -1,18 +1,22 @@
+import { Suspense } from "react"
 import { redirect } from "next/navigation"
 import Link from "next/link"
 import { prisma } from "@/lib/prisma"
 import { requireWorkspace, canEdit } from "@/lib/workspace"
 import { BoardGrid } from "@/components/BoardGrid"
-import { TemplateRow } from "@/components/TemplateRow"
 import { SharedWithMe } from "@/components/SharedWithMe"
 import { JoinWithCode } from "@/components/JoinWithCode"
+import { BoardTypeRow } from "@/components/BoardTypeRow"
+import { RecentMenu } from "@/components/RecentMenu"
+import DashboardLoading from "./loading"
 import type { InputJsonValue } from "@/generated/prisma/internal/prismaNamespace"
-import {
-  TEMPLATE_NAMES,
-  type TemplateId,
-  isTemplateId,
-  templateObjects,
-} from "@/lib/templates"
+import { TEMPLATE_NAMES, type TemplateId, templateObjects } from "@/lib/templates"
+
+/**
+ * How many boards the front page's Recent strip shows. A quick-access strip, not the
+ * inventory — the full list lives behind the sidebar's All Boards.
+ */
+const RECENT_LIMIT = 10
 
 async function createBoard() {
   "use server"
@@ -62,24 +66,37 @@ async function createFromTemplateId(id: TemplateId) {
   redirect(`/board/${board.id}`)
 }
 
-/** Form-action wrapper: reads the template from the submitted form and validates it. */
-async function createFromTemplate(formData: FormData) {
-  "use server"
-  const raw = formData.get("template")
-  // Never the raw form value into the switch — this arrives from the browser like any
-  // other request body.
-  await createFromTemplateId(isTemplateId(raw) ? raw : "blank")
-}
 
+/**
+ * Recent / All Boards / Starred / search are the SAME route with a different query
+ * string, and Next does not show loading.tsx for a query-string-only navigation — the
+ * segment never changes, so its boundary never remounts. Keying a Suspense on the query
+ * does remount it, so every sidebar click shows the skeleton immediately instead of
+ * leaving the old view up until the database answers.
+ */
 export default async function DashboardPage({
   searchParams,
 }: {
   searchParams: Promise<{ view?: string; q?: string }>
 }) {
-  const { workspace, role, user } = await requireWorkspace()
   const { view = "", q = "" } = await searchParams
+  return (
+    <Suspense key={`${view}|${q}`} fallback={<DashboardLoading />}>
+      <DashboardContent view={view} q={q} />
+    </Suspense>
+  )
+}
 
-  const boards = await prisma.board.findMany({
+async function DashboardContent({ view, q }: { view: string; q: string }) {
+  const { workspace, role, user } = await requireWorkspace()
+
+  /**
+   * The three lists are independent, so they go out together rather than one after the
+   * other. Sequential awaits cost three round trips to a remote Postgres on every
+   * sidebar click, which is most of the delay that made a click look like it had done
+   * nothing at all.
+   */
+  const boardsQuery = prisma.board.findMany({
     where: {
       workspaceId: workspace.id,
       deletedAt: null,
@@ -93,10 +110,12 @@ export default async function DashboardPage({
       updatedAt: true,
       theme: true,
       starredBy: { where: { userId: user.id }, take: 1, select: { boardId: true } },
+      // When THIS user last opened it. Same bounded-take pattern as starredBy above, so
+      // Recent costs no extra round trip — and null means "never opened", which is a
+      // different thing from "opened long ago" and has to stay distinguishable.
+      views: { where: { userId: user.id }, take: 1, select: { viewedAt: true } },
     },
   })
-
-  const rows = boards.map(({ starredBy, ...b }) => ({ ...b, starred: starredBy.length > 0 }))
 
   /**
    * "Shared with me" = boards in a workspace somebody ELSE owns.
@@ -106,7 +125,7 @@ export default async function DashboardPage({
    * the owner. No new column, and it cannot drift out of sync with the permissions that
    * actually govern access.
    */
-  const shared = await prisma.board.findMany({
+  const sharedQuery = prisma.board.findMany({
     where: {
       deletedAt: null,
       workspaceId: { not: workspace.id },
@@ -135,10 +154,22 @@ export default async function DashboardPage({
   // One query for this user's roles across the workspaces they don't own, keyed by
   // workspaceId and matched onto the rows below — the permission badge is the real
   // membership rather than an assumption, without a query per row.
-  const sharedRoles = await prisma.membership.findMany({
+  const sharedRolesQuery = prisma.membership.findMany({
     where: { userId: user.id, role: { not: "OWNER" } },
     select: { workspaceId: true, role: true },
   })
+  const [boards, shared, sharedRoles] = await Promise.all([
+    boardsQuery,
+    sharedQuery,
+    sharedRolesQuery,
+  ])
+
+  const rows = boards.map(({ starredBy, views, ...b }) => ({
+    ...b,
+    starred: starredBy.length > 0,
+    viewedAt: views[0]?.viewedAt ?? null,
+  }))
+
   const roleByWorkspace = new Map(sharedRoles.map((m) => [m.workspaceId, m.role]))
 
   const sharedWithPermission = shared.map((b) => ({
@@ -153,14 +184,30 @@ export default async function DashboardPage({
   }))
 
   const starred = rows.filter((b) => b.starred)
-  const visible = view === "starred" ? starred : view === "recent" ? rows.slice(0, 6) : rows
-  const heading =
-    view === "starred" ? "Starred" : view === "recent" ? "Recent Boards" : "All Boards"
+
+  /**
+   * Recent is what you OPENED, newest first — Board.updatedAt is the last edit by anyone
+   * and answers a different question, which is why BoardView exists at all.
+   *
+   * Boards you have never opened are excluded rather than sorted last: a quick-access
+   * strip padded out with things you have never seen is just All Boards wearing a
+   * different heading, and All Boards is one click away in the sidebar.
+   */
+  const recent = rows
+    .filter((b) => b.viewedAt)
+    .sort((a, b) => b.viewedAt!.getTime() - a.viewedAt!.getTime())
+    .slice(0, RECENT_LIMIT)
+
+  // "recent" is the old URL for what is now simply the dashboard's front page; it still
+  // resolves so existing links and bookmarks land where they always did.
+  const isRecent = view !== "starred" && view !== "all"
+  const visible = view === "starred" ? starred : view === "all" ? rows : recent
+  const heading = view === "starred" ? "Starred" : view === "all" ? "All Boards" : "Recent"
 
   return (
     <div className="space-y-10">
-      <section className="flex flex-wrap items-end justify-between gap-4">
-        <div>
+      <section>
+        <div className="mb-4">
           <h1>Create new</h1>
           {/* The subtext AND the code field both live here — the link is a phrase inside
               the sentence, so the field opens under the words that offered it. Joining is
@@ -168,43 +215,36 @@ export default async function DashboardPage({
               and the invite's own role decides what you get on the other side. */}
           <JoinWithCode />
         </div>
-        <div className="flex items-center gap-4">
-          {canEdit(role) && (
-            <form action={createBoard}>
-              {/* "New canvas", not "Create new" — the heading already says Create new,
-                  and the two actions here are exactly the two the subtext offers: start
-                  with a canvas, or join with a code. */}
-              <button
-                type="submit"
-                className="rounded-full bg-primary px-5 py-2.5 text-body-sm font-medium text-on-primary transition-colors hover:bg-accent-hover"
-              >
-                New canvas
-              </button>
-            </form>
-          )}
-        </div>
+        {/* The standalone "New canvas" button is gone: it is the Whiteboard card now.
+            One create action, given the shape of the board it makes, sitting beside the
+            types that do not exist yet and the templates page. */}
+        <BoardTypeRow canCreate={canEdit(role)} createWhiteboard={createBoard} />
       </section>
-
-      {/* Templates are hidden while searching — a filtered view is a hunt for one board,
-          and a template row in the middle of the results is noise. */}
-      {!q && view !== "shared" && (
-        <TemplateRow canCreate={canEdit(role)} action={createFromTemplate} limit={4} />
-      )}
 
       {view !== "shared" && (
         <section>
           <div className="mb-4 flex items-baseline justify-between">
             <h2>{q ? `Results for “${q}”` : heading}</h2>
-            {q && (
+            {q ? (
               <Link href="/dashboard" className="text-body-sm text-primary hover:underline">
                 Clear search
               </Link>
+            ) : (
+              // Only on Recent, and only for someone who could delete a board one at a
+              // time anyway — this is that same soft-delete, applied to the strip.
+              isRecent &&
+              canEdit(role) && <RecentMenu boardIds={visible.map((b) => b.id)} />
             )}
           </div>
           <BoardGrid
             boards={visible}
             canEdit={canEdit(role)}
-            newBoardAction={canEdit(role) && !q ? createBoard : undefined}
+            // Not on Starred: a new board is never born starred, so the tile would drop
+            // its result into a different section than the one you pressed it in — which
+            // is the contract BoardGrid documents on this prop.
+            newBoardAction={
+              canEdit(role) && !q && view !== "starred" ? createBoard : undefined
+            }
           />
         </section>
       )}

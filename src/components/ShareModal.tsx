@@ -3,6 +3,8 @@
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { Modal } from "@/components/Modal"
 import { SHARE_ACCESS, SHARE_LABELS, type ShareAccess, grantsAccess } from "@/lib/share"
+import { motion } from "framer-motion"
+import { PRESS } from "@/lib/motion"
 
 type Role = "OWNER" | "EDITOR" | "VIEWER"
 type Member = {
@@ -292,13 +294,14 @@ export function ShareModal({
               <option value="EDITOR">Editor</option>
               <option value="VIEWER">Viewer</option>
             </select>
-            <button
+            <motion.button
               type="submit"
               disabled={busy}
+              {...PRESS}
               className="rounded bg-accent-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-700 disabled:opacity-50"
             >
               Invite
-            </button>
+            </motion.button>
           </form>
         )}
 

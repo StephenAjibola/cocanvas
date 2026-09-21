@@ -74,14 +74,25 @@ export const NOTE_PADDING = 14 // world units of margin around the text
 export const NOTE_FONT = 15 // world units
 export const NOTE_LINE_HEIGHT = 1.35
 /**
- * 2px, and deliberately not more.
- *
- * A sticky note is paper: real ones have a cut edge, not a moulded one. Everything else
- * in the UI is software and rounds at 8px and up, so keeping the note nearly square is
- * what separates board CONTENT from the chrome around it — at 4px it started to read as
- * another card. Matches --radius-xs in globals.css.
+ * 3px. A sticky note is paper: a small cut-edge corner, not a moulded card. Everything
+ * else in the UI rounds at 8px and up, which is what keeps board CONTENT distinct from
+ * the chrome around it. Matches --radius-xs in globals.css.
  */
-export const NOTE_RADIUS = 2
+export const NOTE_RADIUS = 3
+
+/**
+ * Level 1 elevation (globals.css --cc-shadow-1), as canvas shadows. Canvas takes one
+ * shadow per fill, so the two layers are two fills. Hover deepens both slightly — the
+ * note reads as something you can pick up. Blur/offset are CSS px (see drawNote).
+ */
+export const NOTE_SHADOW = [
+  { y: 1, blur: 3, alpha: 0.08 },
+  { y: 1, blur: 2, alpha: 0.06 },
+]
+export const NOTE_SHADOW_HOVER = [
+  { y: 3, blur: 8, alpha: 0.12 },
+  { y: 1, blur: 3, alpha: 0.08 },
+]
 
 /**
  * Edge definition for a note.
@@ -215,9 +226,17 @@ export function wrapText(
 
 // The drop: a placed note lands from slightly small and soft. back.out overshoots past
 // t=1 and settles, which is what makes it read as landing rather than growing.
-export const DROP_SCALE = 0.6 // scale at t=0
-export const DROP_ALPHA = 0.3 // opacity at t=0
-export const DROP_DURATION = 0.38 // seconds
+//
+// Tuned DOWN from 0.6 scale / 0.3 alpha / 0.38s. That version read as the sticky
+// inflating into place — at 60% scale and 30% opacity the first frame barely looks like
+// a note at all, and 380ms is long enough to watch. The brief for this pass was a slight
+// overshoot at ~200ms, subtle rather than bouncy, so the travel shrank and the curve
+// stayed: back.out still carries it a hair past full size and settles back, which is the
+// part that reads as LANDING. Every number here is a feel judgement — change them
+// together and look at a real sticky, not at the graph.
+export const DROP_SCALE = 0.85 // scale at t=0
+export const DROP_ALPHA = 0.6 // opacity at t=0
+export const DROP_DURATION = 0.2 // seconds
 export const DROP_EASE = "back.out(1.7)"
 
 /**
@@ -225,9 +244,55 @@ export const DROP_EASE = "back.out(1.7)"
  * overshoot, so t arrives here above 1 mid-flight and this must not clamp the scale or
  * the bounce is flattened out.
  */
-export function dropStyle(t: number) {
+/**
+ * The exit: a deleted object shrinks slightly and fades out.
+ *
+ * t runs 1 -> 0 here, the opposite of the drop, because the tween is written as "go to
+ * zero" and reading `t` as "how much of this object is left" keeps the draw code honest.
+ *
+ * Shorter and smaller-travel than the drop on purpose. An entrance can afford to be
+ * noticed; an exit is confirming something you already decided, and anything longer than
+ * ~150ms puts a delay between pressing Delete and the space being free. It does NOT
+ * scale to zero — vanishing to a point reads as the object flying away, when what
+ * happened is that it stopped existing.
+ */
+export const DIE_SCALE = 0.9 // scale at t=0, just before it is gone
+export const DIE_DURATION = 0.15 // seconds
+export const DIE_EASE = "power2.in"
+
+export function dieStyle(t: number) {
+  return { scale: DIE_SCALE + (1 - DIE_SCALE) * t, alpha: Math.max(0, t) }
+}
+
+/**
+ * The lift: an object under an active drag sits slightly proud of the board.
+ *
+ * 2% and a soft shadow. Enough that the thing under your cursor separates from what it
+ * is passing over, small enough that it does not jump on grab — the number is low
+ * BECAUSE the object is already tracking the pointer, and a bigger lift reads as the
+ * object slipping out from under the finger.
+ */
+export const LIFT_SCALE = 1.02
+export const LIFT_DURATION = 0.14
+export const LIFT_EASE = "power2.out"
+/** Shadow blur in SCREEN px — scaled by the view before use, or it grows with zoom. */
+export const LIFT_SHADOW = 18
+
+export function liftStyle(t: number) {
+  return { scale: 1 + (LIFT_SCALE - 1) * t, blur: LIFT_SHADOW * t, alpha: 0.28 * t }
+}
+
+/**
+ * Where a SHAPE or ARROW starts its drop. Closer to 1 than a sticky's, because a shape is
+ * drawn by dragging and is already on screen at full size under the cursor when the
+ * pointer lifts — starting it at 0.85 would visibly shrink it on release before the
+ * spring brings it back. A sticky has no preview, so it can afford the real travel.
+ */
+export const SHAPE_DROP_SCALE = 0.94
+
+export function dropStyle(t: number, from = DROP_SCALE) {
   return {
-    scale: DROP_SCALE + (1 - DROP_SCALE) * t,
+    scale: from + (1 - from) * t,
     // Alpha does clamp: overshooting opacity is not a thing.
     alpha: Math.min(1, DROP_ALPHA + (1 - DROP_ALPHA) * t),
   }

@@ -1,3 +1,4 @@
+import { cache } from "react"
 import { redirect } from "next/navigation"
 import { cookies } from "next/headers"
 import { auth } from "@/lib/auth"
@@ -51,8 +52,13 @@ async function bootstrap(user: UserRow, slug: string) {
  * WorkspaceInvite), which is why this returns the whole list rather than just one —
  * the sidebar's workspace switcher reads it directly off this instead of a second
  * query.
+ *
+ * cache()d per REQUEST, not across requests: the dashboard layout and the page it wraps
+ * both need this, and each call is a session decode plus two database round trips. On a
+ * remote Postgres that was most of a second of dead time on every sidebar click, spent
+ * fetching an answer the same render already had.
  */
-export async function requireWorkspace() {
+export const requireWorkspace = cache(async function requireWorkspace() {
   const session = await auth()
   if (!session?.user?.email) redirect("/login")
 
@@ -87,7 +93,7 @@ export async function requireWorkspace() {
     role: current.role,
     memberships: rows.map((m) => ({ id: m.workspace.id, name: m.workspace.name, role: m.role })),
   }
-}
+})
 
 /** Just the auth gate, for pages that don't need the workspace. */
 export async function requireUser() {

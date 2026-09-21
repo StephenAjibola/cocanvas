@@ -48,7 +48,9 @@
 
   /* ---- Lines ---- */
   --outline: #727687; /* control borders — 4.28 on --surface, clears 1.4.11's 3.0 */
-  --outline-variant: #c2c6d8; /* hairlines and dividers — decorative */
+  /* Hairlines and dividers — decorative, and deliberately near-invisible: shadow does
+   * the separating (see ELEVATION). Translucent so it reads the same on any ground. */
+  --outline-variant: rgb(0 0 0 / 0.08);
 
   /* ---- Primary (violet) ---- */
   --primary: #7F00FF; /* 5.95 as link text on surface, 6.28 under white as a fill */
@@ -213,7 +215,7 @@
    * a Tailwind key at a same-named variable is a self-reference that resolves to nothing.
    * These are the real custom properties; the @theme block aliases them.
    */
-  --cc-radius-xs: 0.125rem; /* 2px — the sticky-note corner, matching NOTE_RADIUS */
+  --cc-radius-xs: 0.1875rem; /* 3px — the sticky-note corner, matching NOTE_RADIUS */
   --cc-radius-sm: 0.25rem; /* 4px */
   --cc-radius: 0.5rem; /* 8px — DEFAULT: buttons and tool icons */
   --cc-radius-md: 0.75rem; /* 12px */
@@ -258,7 +260,13 @@
   --cc-glass-blur: 20px;
   --cc-glass-edge-inner: rgb(255 255 255 / 0.10);
   --cc-glass-edge-outer: rgb(0 0 0 / 0.05);
-  --cc-elevation-3-shadow: 0 8px 30px color-mix(in srgb, var(--primary) 10%, transparent);
+  /* Cast shadows. Level 1 is a card resting on the page (board cards, thumbnails, and
+   * sticky notes — mirrored as canvas shadows in NOTE_SHADOW, src/lib/notes.ts). Level 2
+   * is anything floating: dialogs, the toolbar, the zoom pill, side panels. */
+  --cc-shadow-1: 0 1px 3px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.06);
+  --cc-shadow-1-hover: 0 3px 8px rgb(0 0 0 / 0.12), 0 1px 3px rgb(0 0 0 / 0.08);
+  --cc-shadow-2: 0 4px 12px rgb(0 0 0 / 0.12);
+  --cc-elevation-3-shadow: var(--cc-shadow-2);
 }
 
 /**
@@ -501,6 +509,10 @@
   --radius-4xl: var(--cc-radius-xl);
   --radius-full: var(--cc-radius-full);
 
+  --shadow-1: var(--cc-shadow-1);
+  --shadow-1-hover: var(--cc-shadow-1-hover);
+  --shadow-2: var(--cc-shadow-2);
+
   --spacing-gutter: var(--cc-gutter);
   --spacing-canvas-margin: var(--cc-canvas-margin);
   --spacing-toolbar-gap: var(--cc-toolbar-gap);
@@ -640,7 +652,9 @@ h4 {
    * highlight is an inset shadow, because a second border is not a thing an element
    * has. Together they give the edge the two-tone bevel that reads as thickness. */
   border: 1px solid var(--cc-glass-edge-outer);
-  box-shadow: inset 0 0 0 1px var(--cc-glass-edge-inner);
+  box-shadow:
+    inset 0 0 0 1px var(--cc-glass-edge-inner),
+    var(--cc-shadow-2);
 }
 
 @utility elevation-3 {

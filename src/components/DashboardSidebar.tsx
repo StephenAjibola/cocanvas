@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 import { Logo } from "@/components/Logo"
@@ -29,10 +30,31 @@ const icon = (d: React.ReactNode) => (
  * instead of four routes that each have to re-derive the same query.
  */
 const VIEWS = [
-  { view: "", label: "All Boards", glyph: icon(<><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></>) },
-  { view: "recent", label: "Recent", glyph: icon(<><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>) },
+  // Recent is the bare /dashboard now: the front page shows what you last opened, so the
+  // row that names that view is the row that points at the front page.
+  { view: "", label: "Recent", glyph: icon(<><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>) },
+  // All Boards keeps the complete, uncapped list it always had — it just needs a view of
+  // its own now that the front page is no longer it.
+  { view: "all", label: "All Boards", glyph: icon(<><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></>) },
   { view: "starred", label: "Starred", glyph: icon(<path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8L3.5 9.7l5.9-.9z" />) },
 ]
+
+/**
+ * Templates, and Trash: the two rows that are their own ROUTE rather than a view of the
+ * board list, which is why neither is in VIEWS above.
+ *
+ * Templates moved here off the dashboard's front page. As a permanent row above the
+ * board grid it competed with the boards themselves on every visit, and the thing you
+ * came for is your work — starting a new one from a template is a deliberate act, so it
+ * gets a deliberate place to go.
+ */
+const TEMPLATES = {
+  href: "/dashboard/templates",
+  label: "Templates",
+  // A page with a smaller page behind it — the "copy this to start" idea, and distinct
+  // from the four-square All Boards grid it sits under.
+  glyph: icon(<><rect x="8" y="3" width="13" height="13" rx="1.5" /><path d="M16 19H4.5A1.5 1.5 0 013 17.5V6" /></>),
+}
 
 const TRASH = {
   href: "/dashboard/trash",
@@ -61,6 +83,73 @@ const WORKSPACE_LINKS = [
   },
 ]
 
+/**
+ * A nav row: the link, and an instant pending state while its navigation is in flight.
+ *
+ * The pending state is OPTIMISTIC — set from this component on click, not read from the
+ * router — and that is the whole point. These rows point at fully dynamic pages, so the
+ * server takes 0.5-3s to answer, and until it does Next leaves the current page on screen
+ * with the URL unchanged. Nothing says the click registered, which is why the rows have
+ * now been reported as dead twice.
+ *
+ * The previous attempt read `useLinkStatus().pending` instead. It did not work: measured
+ * against a 513ms navigation, `pending` first turned true at 514ms — the moment the new
+ * page committed and the feedback was no longer needed. Owning the state here means the
+ * row lights up on the click itself, before any of the round trip has happened.
+ *
+ * `loading.tsx` covers the other half — the CONTENT area — but only when the route
+ * segment changes. Switching ?view= re-renders the same segment and shows no loading
+ * boundary at all, so for three of these five rows this is the only feedback there is.
+ */
+function NavRow({
+  href,
+  glyph,
+  label,
+  active,
+  pending,
+  onNavigate,
+  className,
+}: {
+  href: string
+  glyph: React.ReactNode
+  label: string
+  active: boolean
+  pending: boolean
+  onNavigate: (href: string) => void
+  className: string
+}) {
+  return (
+    <Link
+      href={href}
+      className={className}
+      onClick={(e) => {
+        // A modifier click opens a new tab and leaves THIS page where it is, so marking
+        // the row pending would light up a navigation that is never going to happen here.
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+        onNavigate(href)
+      }}
+    >
+      {glyph}
+      {label}
+      {/* Only while pending AND not yet arrived — the row it lands on is already
+          highlighted, and a spinner that outlives its navigation is its own bug. */}
+      {pending && !active && (
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden
+          className="ml-auto shrink-0 animate-spin"
+        >
+          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
+          <path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+        </svg>
+      )}
+    </Link>
+  )
+}
+
 export function DashboardSidebar({
   currentWorkspaceId,
   workspaces,
@@ -72,7 +161,25 @@ export function DashboardSidebar({
 }) {
   const pathname = usePathname()
   const params = useSearchParams()
-  const view = params.get("view") ?? ""
+  // "recent" is the old URL for what is now the bare front page — normalised here so an
+  // existing bookmark still lights up the row it belongs to.
+  const raw = params.get("view") ?? ""
+  const view = raw === "recent" ? "" : raw
+  /**
+   * The href the browser is on, written the same way the rows above write theirs, so a
+   * row can be compared against it directly.
+   */
+  const here = pathname === "/dashboard" ? (view ? `/dashboard?view=${view}` : "/dashboard") : pathname
+  /**
+   * The row we are navigating TO, remembered together with the page we left FROM.
+   *
+   * Storing `from` is what makes this self-clearing with no effect and no timer: `here`
+   * only changes once the new page commits, so the moment it does, the stored `from` no
+   * longer matches and the pending state is stale by construction. That covers arriving,
+   * the back button, and a navigation started anywhere else on the page.
+   */
+  const [pending, setPending] = useState<{ href: string; from: string } | null>(null)
+  const pendingHref = pending && pending.from === here ? pending.href : null
   const current = workspaces.find((w) => w.id === currentWorkspaceId) ?? {
     id: currentWorkspaceId,
     name: "Workspace",
@@ -88,28 +195,50 @@ export function DashboardSidebar({
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-outline-variant bg-surface-container-lowest px-4 py-6">
-      <Logo variant="light" className="mb-4 px-2" />
+      <Logo variant="light" href="/dashboard" className="mb-4 px-2" />
       <div className="mb-6">
         <WorkspaceSwitcher current={current} workspaces={workspaces} />
       </div>
 
       <nav className="flex flex-col gap-1">
-        {VIEWS.map((v) => (
-          <Link
-            key={v.label}
-            href={v.view ? `/dashboard?view=${v.view}` : "/dashboard"}
-            className={rowClass(pathname === "/dashboard" && view === v.view)}
-          >
-            {v.glyph}
-            {v.label}
-          </Link>
-        ))}
+        {VIEWS.map((v) => {
+          const href = v.view ? `/dashboard?view=${v.view}` : "/dashboard"
+          return (
+            <NavRow
+              key={v.label}
+              href={href}
+              glyph={v.glyph}
+              label={v.label}
+              active={pathname === "/dashboard" && view === v.view}
+              pending={pendingHref === href}
+              onNavigate={(href) => setPending({ href, from: here })}
+              className={rowClass(pathname === "/dashboard" && view === v.view)}
+            />
+          )
+        })}
+        {/* Open to a VIEWER too: the page itself decides what they can do with it, and
+            it is worth being able to see what a template IS before asking for access to
+            create one. */}
+        <NavRow
+          href={TEMPLATES.href}
+          glyph={TEMPLATES.glyph}
+          label={TEMPLATES.label}
+          active={pathname === TEMPLATES.href}
+          pending={pendingHref === TEMPLATES.href}
+          onNavigate={(href) => setPending({ href, from: here })}
+          className={rowClass(pathname === TEMPLATES.href)}
+        />
         {/* A VIEWER cannot delete anything, so Trash has nothing for them to do. */}
         {role !== "VIEWER" && (
-          <Link href={TRASH.href} className={rowClass(pathname === TRASH.href)}>
-            {TRASH.glyph}
-            {TRASH.label}
-          </Link>
+          <NavRow
+            href={TRASH.href}
+            glyph={TRASH.glyph}
+            label={TRASH.label}
+            active={pathname === TRASH.href}
+            pending={pendingHref === TRASH.href}
+            onNavigate={(href) => setPending({ href, from: here })}
+            className={rowClass(pathname === TRASH.href)}
+          />
         )}
       </nav>
 
@@ -117,20 +246,23 @@ export function DashboardSidebar({
         Workspaces
       </h2>
       <nav className="flex flex-col gap-1">
-        {WORKSPACE_LINKS.map((l) => (
-          <Link
-            key={l.href}
-            href={l.href}
-            className={rowClass(
-              l.href.startsWith("/dashboard?")
-                ? pathname === "/dashboard" && view === "shared"
-                : pathname === l.href,
-            )}
-          >
-            {l.glyph}
-            {l.label}
-          </Link>
-        ))}
+        {WORKSPACE_LINKS.map((l) => {
+          const active = l.href.startsWith("/dashboard?")
+            ? pathname === "/dashboard" && view === "shared"
+            : pathname === l.href
+          return (
+            <NavRow
+              key={l.href}
+              href={l.href}
+              glyph={l.glyph}
+              label={l.label}
+              active={active}
+              pending={pendingHref === l.href}
+              onNavigate={(href) => setPending({ href, from: here })}
+              className={rowClass(active)}
+            />
+          )
+        })}
       </nav>
 
       {/**

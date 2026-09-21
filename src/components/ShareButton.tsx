@@ -3,6 +3,8 @@
 import { useState } from "react"
 import { ShareModal } from "@/components/ShareModal"
 import type { ShareAccess } from "@/lib/share"
+import { AnimatePresence, motion } from "framer-motion"
+import { PRESS } from "@/lib/motion"
 
 /**
  * The header's Share control: a button, and the modal it opens.
@@ -27,22 +29,26 @@ export function ShareButton({
 
   return (
     <>
-      <button
+      <motion.button
         type="button"
         onClick={() => setOpen(true)}
+        {...PRESS}
         className="rounded-full bg-primary px-4 py-1.5 text-body-sm font-medium text-on-primary transition-colors hover:bg-accent-hover"
       >
         Share
-      </button>
+      </motion.button>
 
-      {open && (
-        <ShareModal
-          boardId={boardId}
-          initialToken={initialToken}
-          initialAccess={initialAccess}
-          onClose={() => setOpen(false)}
-        />
-      )}
+      <AnimatePresence>
+        {open && (
+          <ShareModal
+            key="share"
+            boardId={boardId}
+            initialToken={initialToken}
+            initialAccess={initialAccess}
+            onClose={() => setOpen(false)}
+          />
+        )}
+      </AnimatePresence>
     </>
   )
 }

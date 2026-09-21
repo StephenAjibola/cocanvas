@@ -5,7 +5,7 @@ import * as Y from "yjs"
 import { WebsocketProvider } from "y-websocket"
 import { SWATCHES } from "@/lib/theme"
 import type { BoardObject } from "@/lib/objects"
-import { type ObjectMap, applyRemote, publish, publishAll, readAll, seed } from "@/lib/sync"
+import { type ObjectMap, applyRemote, publish, publishAll, seed } from "@/lib/sync"
 
 const WS_URL = process.env.NEXT_PUBLIC_REALTIME_URL ?? "ws://localhost:1234"
 
@@ -233,7 +233,13 @@ export function useBoardSync(
         if (saveTimer) clearTimeout(saveTimer)
         saveTimer = setTimeout(() => {
           saveTimer = null
-          const objects = readAll(map)
+          // The local array, NOT readAll(map) — the same source the unmount flush below
+          // already uses. The map only holds what this client has published or received,
+          // so a session that never synced (realtime server down, socket refused) holds
+          // an EMPTY map over a full board, and saving that wiped the board's contents
+          // in Postgres. The array is hydrated from the database at mount, so it is the
+          // honest state of what is on screen whether or not the socket ever opened.
+          const objects = objectsRef.current.map((o) => structuredClone(o))
           fetch(`/api/board/${encodeURIComponent(room)}/objects`, {
             method: "PUT",
             headers: { "content-type": "application/json" },
@@ -257,7 +263,13 @@ export function useBoardSync(
 
       touchRef.current = (id) => {
         dirty.add(id)
-        if (!frame) frame = requestAnimationFrame(flush)
+        // Cancel-and-re-request, never `if (!frame)`. The latching form has already cost
+        // BoardCanvas twice (see requestDraw): when a scheduled frame never RUNS — a
+        // backgrounded tab, an occluded window — `frame` stays non-zero forever and every
+        // later touch is a silent no-op, so edits stop being published AND stop being
+        // saved with nothing on screen to say so. Coalescing is unaffected.
+        if (frame) cancelAnimationFrame(frame)
+        frame = requestAnimationFrame(flush)
       }
 
       resyncRef.current = () => {
@@ -327,6 +339,9 @@ export function useBoardSync(
           map: () => ymap.toJSON(),
           keys: () => [...map.keys()],
           objects: () => objectsRef.current.length,
+          // The ARRAY, not its length — the map only shows what has been published, so
+          // this is the only way to see an object between its creation and its flush.
+          array: () => objectsRef.current.map((o) => structuredClone(o)),
           held: () => [...holdRef.current],
           wsconnected: () => provider?.wsconnected,
           bcconnected: () => provider?.bcconnected,

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 import { prisma } from "@/lib/prisma"
 import { requireWorkspace, canEdit } from "@/lib/workspace"
 import { TrashGrid } from "@/components/TrashGrid"
+import { ClearTrashButton } from "@/components/ClearTrashButton"
 
 export default async function TrashPage() {
   const { workspace, role } = await requireWorkspace()
@@ -16,7 +17,12 @@ export default async function TrashPage() {
 
   return (
     <main className="text-ink-900">
-      <h1 className="mb-8 text-2xl font-medium">Trash</h1>
+      <div className="mb-8 flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-medium">Trash</h1>
+        {/* Renders nothing when the Trash is empty — an enabled "Clear Trash" with
+            nothing to clear is a destructive-looking button that does nothing. */}
+        <ClearTrashButton count={boards.length} />
+      </div>
       <TrashGrid boards={boards.map((b) => ({ ...b, deletedAt: b.deletedAt! }))} />
     </main>
   )

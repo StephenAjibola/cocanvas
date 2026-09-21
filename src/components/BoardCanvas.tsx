@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import gsap from "gsap"
+import { AnimatePresence } from "framer-motion"
 import {
   MAX_SCALE,
   MIN_SCALE,
@@ -31,16 +32,25 @@ import {
 } from "@/lib/strokes"
 import { recognizeShape } from "@/lib/recognize"
 import {
+  DIE_DURATION,
+  DIE_EASE,
   DROP_DURATION,
   DROP_EASE,
+  LIFT_DURATION,
+  LIFT_EASE,
   NOTE_FONT,
   NOTE_RADIUS,
+  NOTE_SHADOW,
+  NOTE_SHADOW_HOVER,
   NOTE_BORDER,
   NOTE_SIZE,
+  SHAPE_DROP_SCALE,
   TEXT_SIZE,
   type Note,
   STICKY_COLORS,
+  dieStyle,
   dropStyle,
+  liftStyle,
   wrapText,
 } from "@/lib/notes"
 import {
@@ -136,6 +146,7 @@ import { ShareButton } from "@/components/ShareButton"
 import { AccountMenu } from "@/components/AccountMenu"
 import { CollaboratorAvatars } from "@/components/CollaboratorAvatars"
 import { BottomPill } from "@/components/BottomPill"
+import { Logo } from "@/components/Logo"
 
 /**
  * A straight arrow: the arrow tool's output, two endpoints and a painted head.
@@ -361,6 +372,27 @@ export function BoardCanvas({
   // rather than in the effect closure so the property panel can edit the selected
   // object directly without the canvas effect re-running.
   const objectsRef = useRef<BoardObject[]>([])
+  /**
+   * Hydrated from the server's snapshot, ONCE, before anything reads the array.
+   *
+   * The board used to start empty here and fill in only when the realtime provider
+   * fired "sync". That made a websocket a precondition for seeing content the page had
+   * already fetched from Postgres: with the relay down, a board with rows in the
+   * database rendered blank — and then the first edit's debounced save wrote that blank
+   * state back over the real rows. A freshly seeded template board is where it showed
+   * up worst, because there is nothing else on it to notice going missing.
+   *
+   * Cloned, and pushed in place rather than assigned: `initialObjects` is a fresh array
+   * from the server component on every render, while everything here — the canvas
+   * effect, history, the sync hook — captures THIS array's identity exactly once.
+   * seed() and applyRemote() still reconcile it against the live document on sync, so
+   * the room stays the authority whenever there is a room.
+   */
+  const hydratedRef = useRef(false)
+  if (!hydratedRef.current) {
+    hydratedRef.current = true
+    for (const o of initialObjects) objectsRef.current.push(structuredClone(o))
+  }
   // The selected object itself, not its id: the panel needs its color and width, and
   // holding the object means render never has to look inside objectsRef — reading a
   // ref during render is what makes a component miss updates. The draw loop reads the
@@ -435,6 +467,14 @@ export function BoardCanvas({
   // requestDraw lives inside the canvas effect's closure; this is the only handle
   // the outside has on it. No-op until the effect mounts.
   const redrawRef = useRef<() => void>(() => {})
+  /**
+   * Plays an object's exit animation. Assigned by the canvas effect.
+   *
+   * A ref because deleteSelected lives out here (it is bound per selection, see below)
+   * while the animation state lives inside the effect with the draw loop. No-op until
+   * the canvas mounts, so a delete that somehow lands first just removes the object.
+   */
+  const fadeOutRef = useRef<(o: BoardObject) => void>(() => {})
   // The pan/zoom transform, mirrored out of the canvas effect the same way redrawRef
   // is: insertImage needs to know what part of the board is on screen right now, and
   // the transform itself lives in that effect's closure, not in React state.
@@ -893,6 +933,8 @@ export function BoardCanvas({
     const i = objectsRef.current.indexOf(selected)
     if (i >= 0) {
       objectsRef.current.splice(i, 1)
+      // Out of the array first, then painted on its way out — see fadeOut.
+      fadeOutRef.current(selected)
       // The index goes with it: restoring the object has to put it back under whatever
       // was painted over it, not on top.
       historyRef.current!.push({ kind: "remove", object: selected, index: i })
@@ -1054,6 +1096,24 @@ export function BoardCanvas({
      * comes out, which is placedKind's job.
      */
     const isPlacingTool = (t: Tool) => t === "shape" || t === "arrow"
+    /**
+     * Tools in which a selected object's GRIPS are live — and, because of that, drawn.
+     *
+     * The resize and rotate handles used to be tested only under `tool === "select"`,
+     * while drawSelectionBox painted them whenever anything was selected, in every tool.
+     * That made the most natural gesture on this board dead on arrival: placing a sticky
+     * leaves the Note tool armed AND the new note selected, so the grips were right
+     * there on screen and a corner drag did nothing at all — the press fell through to
+     * the note branch, which sees an existing note under the pointer and just re-selects
+     * it. Same for a text box, a shape and an arrow.
+     *
+     * Pen, eraser and pan are excluded on both counts. Those own the whole press for a
+     * drag of their own, and letting an 11px grip swallow the start of a stroke or an
+     * erase sweep would trade this bug for a worse one — so in those tools the handles
+     * are not drawn either, and the selection shows as the dashed outline alone.
+     */
+    const handlesLive = (t: Tool) =>
+      t === "select" || t === "note" || t === "text" || isPlacingTool(t)
     /** The shape a placing drag produces: the armed kind, unless Arrow forced it. */
     const placedKind = (): PlacedShape =>
       toolRef.current === "arrow" ? "arrow" : shapeKindRef.current
@@ -1166,7 +1226,57 @@ export function BoardCanvas({
     // so it can never leak into a database write or a sync payload. One map for both
     // kinds — it is just "progress", and each kind reads it its own way: strokes
     // through settleStyle, notes through dropStyle. Entries delete themselves when done.
-    const settling = new Map<string, { t: number }>()
+    /**
+     * Whether the viewer asked the OS for less motion.
+     *
+     * Asked FRESH each time rather than captured once: the setting can be changed while
+     * a board is open, and a value read at mount would keep animating for the rest of
+     * the session. Framer's half of the app is covered by MotionConfig in
+     * MotionProvider; the canvas runs on GSAP's own ticker and has to ask for itself.
+     *
+     * Everything it gates degrades to the FINISHED state, never to a missing one — an
+     * object still appears, still disappears, still shows its selection. It just gets
+     * there in one frame.
+     */
+    const reduceMotion = () =>
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+
+    /** Selection outline entrance: quick, because it answers a click. */
+    const SELECT_DURATION = 0.12
+    const SELECT_EASE = "power2.out"
+    /** Extra screen px the outline starts out from the object, before it tightens on. */
+    const SELECT_SLACK = 4
+
+    const settling = new Map<string, { t: number; timer?: ReturnType<typeof setTimeout> }>()
+    /**
+     * Objects mid-EXIT: already spliced out of `objects`, still painted while they fade.
+     *
+     * They have to be held here rather than left in the array, because everything else —
+     * hit testing, bounds, the save payload, what gets published to peers — must treat a
+     * deleted object as gone the instant it is deleted. Only the paint lags.
+     */
+    const dying = new Map<
+      string,
+      { obj: BoardObject; t: number; timer?: ReturnType<typeof setTimeout> }
+    >()
+    /** Selection outline entrance: which id it belongs to, and how far in it is. */
+    const sel = { id: null as string | null, t: 1 }
+    /** Drag lift: which id is held, and how far off the board it is. */
+    const lift = { id: null as string | null, t: 0 }
+    /** The sticky under an idle pointer, which gets the deeper hover shadow. */
+    let hoverNote: string | null = null
+    /**
+     * Multiplied into every object's alpha as it is painted. 1 for everything except an
+     * object on its way out — see the dying pass in drawObjects.
+     */
+    let fade = 1
+    /**
+     * Slack on the entry animation's backstop below, so a tween running normally always
+     * finishes first and the fallback is dead code on the happy path. `back.out` also
+     * overshoots slightly past its nominal duration.
+     */
+    const SETTLE_GRACE_MS = 400
     // One HTMLImageElement per src, loaded lazily on first paint. A board can hold the
     // same upload more than once (duplicate, paste), and re-decoding on every one of
     // them would be wasted network and CPU for a bitmap that never changes.
@@ -1526,21 +1636,59 @@ export function BoardCanvas({
 
     function drawSelection() {
       const s = objects.find((x) => x.id === selectedIdRef.current)
-      if (!s) return
+      if (!s) {
+        // Nothing selected: reset so the NEXT selection animates in rather than
+        // inheriting a finished tween from the last one.
+        sel.id = null
+        return
+      }
+      /**
+       * Started from the draw rather than from a selection effect, because this is the
+       * one place that already knows both which object is selected and that it is about
+       * to be painted. A selection that changes twice before a frame runs animates once,
+       * which is the correct number of times.
+       */
+      if (sel.id !== s.id) {
+        sel.id = s.id
+        // NOT an early return: the outline still has to be painted on this very frame,
+        // it just skips straight to full strength.
+        if (reduceMotion()) sel.t = 1
+        else {
+        sel.t = 0
+        gsap.to(sel, {
+          t: 1,
+          duration: SELECT_DURATION,
+          ease: SELECT_EASE,
+          overwrite: true,
+          onUpdate: requestDraw,
+          onComplete: requestDraw,
+        })
+        }
+      }
       // A stroke needs two points before it has a box worth outlining; a note always
       // has one.
       if (s.type === "stroke" && s.points.length < 2) return
+      // The outline rides the lift with its object. Without this the object scales to
+      // 102% under the drag and its own selection box stays at 100%, so the thing you
+      // are holding visibly grows out of its own outline.
+      const held = lift.id === s.id && lift.t > 0 ? liftStyle(lift.t) : null
+      ctx.save()
+      if (held) scaleAbout(s, held.scale)
       // Drawn inside the object's own rotation, so the box and its handles turn with it
       // rather than snapping back to an axis-aligned cage.
       withRotation(s, () => drawSelectionBox(s))
+      ctx.restore()
     }
 
     function drawSelectionBox(s: BoardObject) {
       const b = objectBounds(s)
-      const pad = 6 / view.scale // breathing room, so the box never touches the ink
+      // The pad CLOSES as the outline comes in: it starts a few px wide of the object and
+      // tightens onto it, which reads as the selection grabbing hold. Paired with the
+      // alpha ramp below — either alone looks like a glitch rather than a movement.
+      const pad = (6 + SELECT_SLACK * (1 - sel.t)) / view.scale
       ctx.save()
       ctx.strokeStyle = THEMES[themeRef.current].stroke
-      ctx.globalAlpha = 0.45
+      ctx.globalAlpha = 0.45 * sel.t
       ctx.lineWidth = 1 / view.scale
       ctx.setLineDash([4 / view.scale, 4 / view.scale])
       ctx.strokeRect(
@@ -1555,13 +1703,19 @@ export function BoardCanvas({
       // that do nothing would be a lie. An attached connector gets none for the same
       // reason: its geometry is rewritten from its endpoints every frame, so a resize or
       // rotate would be undone before you saw it.
-      if (s.locked || isLinked(s)) return
+      //
+      // And none in a tool that would not honour them: the same rule, applied to the
+      // one case that used to break it. See handlesLive — the dashed outline still says
+      // what is selected, it just stops advertising a grip that press would ignore.
+      if (s.locked || isLinked(s) || !handlesLive(toolRef.current)) return
 
       const u = 1 / view.scale // world units per screen px
       const h = handlesFor(s, ROTATE_DIST * u)
       const size = HANDLE_SIZE * u
 
       ctx.save()
+      // The grips arrive with the box, not before it.
+      ctx.globalAlpha = sel.t
       ctx.fillStyle = THEMES[themeRef.current].bg
       ctx.strokeStyle = THEMES[themeRef.current].stroke
       ctx.lineWidth = 1.25 * u
@@ -1789,11 +1943,152 @@ export function BoardCanvas({
       // needing a hook bolted onto each mutator (and a tenth one forgotten).
       rerouteAll(objects)
       for (const o of objects) {
+        // The lift is a TRANSFORM around the object, not a property of it: nothing about
+        // the stored geometry changes while you hold it, so a drag that is interrupted
+        // (tab hidden, pointer lost) can never leave an object 2% too big on the board.
+        const held = lift.id === o.id && lift.t > 0 ? liftStyle(lift.t) : null
+        if (held) {
+          ctx.save()
+          scaleAbout(o, held.scale)
+          /**
+           * The shadow is cast by a solid stand-in BEHIND the note, never by the note
+           * itself.
+           *
+           * ctx.shadowBlur applies to every path drawn while it is set — so setting it
+           * and then calling drawNote puts an 18px drop shadow under the card, under
+           * every line of its text, and under its label. That is a smudge, not a lift.
+           * Filling the bounds once, in the board's own background colour, casts exactly
+           * one shadow; the note is then painted over the top and hides the stand-in.
+           *
+           * Notes only. A transparent PNG would gain a visible opaque rectangle, and a
+           * pen stroke has no solid body to cast from — those lift by scale alone.
+           */
+          if (o.type === "note") {
+            withRotation(o, () => {
+              const b = objectBounds(o)
+              ctx.save()
+              ctx.shadowColor = `rgba(0,0,0,${held.alpha})`
+              // Screen px, converted — a shadow specified in world units doubles when
+              // you zoom in, and an object dragged at 4x would trail a black cloud.
+              ctx.shadowBlur = held.blur / view.scale
+              ctx.shadowOffsetY = held.blur / 3 / view.scale
+              ctx.fillStyle = THEMES[themeRef.current].bg
+              ctx.fillRect(b.minX, b.minY, b.maxX - b.minX, b.maxY - b.minY)
+              ctx.restore()
+            })
+          }
+        }
+        // Shapes and arrows land like a sticky does; freehand ink keeps its settle alone.
+        const landing = o.type === "stroke" && o.shape ? settling.get(o.id) : undefined
+        if (landing) {
+          ctx.save()
+          scaleAbout(o, dropStyle(landing.t, SHAPE_DROP_SCALE).scale)
+        }
         withRotation(o, () =>
           o.type === "note" ? drawNote(o) : o.type === "image" ? drawImage(o) : drawStroke(o),
         )
+        if (landing) ctx.restore()
+        if (held) ctx.restore()
+      }
+
+      // AFTER the live objects, so something on its way out passes over what remains
+      // rather than under it — it was on top when you deleted it.
+      for (const d of dying.values()) {
+        // Back in `objects` means the delete was undone while the fade was still
+        // playing — Ctrl+Z inside 150ms, which is an easy thing to do by accident.
+        // Without this the restored object and its own ghost are painted on top of each
+        // other for the rest of the fade. Guarding HERE rather than in the undo handler
+        // covers every route an id can come back by: undo, redo, paste, and a peer
+        // re-adding it over the wire.
+        if (objects.some((o) => o.id === d.obj.id)) continue
+        const { scale, alpha } = dieStyle(d.t)
+        ctx.save()
+        fade = alpha
+        scaleAbout(d.obj, scale)
+        withRotation(d.obj, () =>
+          d.obj.type === "note"
+            ? drawNote(d.obj as Note)
+            : d.obj.type === "image"
+              ? drawImage(d.obj as ImageObject)
+              : drawStroke(d.obj as Stroke),
+        )
+        fade = 1
+        ctx.restore()
       }
       ctx.globalAlpha = 1
+    }
+
+    /**
+     * Raises or lowers the drag lift.
+     *
+     * Tweened both ways rather than snapped: the lift going on instantly is a pop, and
+     * the lift going off instantly is the object slapping back onto the board at the end
+     * of every drag. `lift.id` is kept through the drop so the settle still has something
+     * to paint; the next grab overwrites it.
+     */
+    function liftTo(id: string, to: 0 | 1) {
+      // No lift at all, rather than an instant one: a 2% jump on grab and a snap back on
+      // drop is more motion than the tween it replaces, not less.
+      if (reduceMotion()) return
+      lift.id = id
+      gsap.to(lift, {
+        t: to,
+        duration: LIFT_DURATION,
+        ease: LIFT_EASE,
+        overwrite: true, // grabbing again mid-release must not fight the old tween
+        onUpdate: requestDraw,
+        onComplete: requestDraw,
+      })
+    }
+
+    /**
+     * Scales an object about its own centre, in world space.
+     *
+     * About the CENTRE, not the origin: scaling around 0,0 would slide an object toward
+     * the top-left of the board by however far it happens to sit from it — the further
+     * out on the canvas, the bigger the jump. Caller owns the save/restore.
+     */
+    function scaleAbout(o: BoardObject, scale: number) {
+      if (scale === 1) return
+      const b = objectBounds(o)
+      const cx = (b.minX + b.maxX) / 2
+      const cy = (b.minY + b.maxY) / 2
+      ctx.translate(cx, cy)
+      ctx.scale(scale, scale)
+      ctx.translate(-cx, -cy)
+    }
+
+    /**
+     * Plays an object out, then forgets it. Call AFTER it has left `objects`.
+     *
+     * Same wall-clock backstop as `animate`, for the same reason: gsap advances from
+     * requestAnimationFrame, and in a tab that gets no frames the tween never completes.
+     * Here that would leave a deleted object painted on the board forever, which is a
+     * considerably worse failure than a skipped animation — so the timer removes it
+     * whether or not a single frame ever ran.
+     */
+    function fadeOut(obj: BoardObject) {
+      // Nothing is added to `dying`, so the object is gone the frame it is deleted.
+      if (reduceMotion()) return
+      const state: { obj: BoardObject; t: number; timer?: ReturnType<typeof setTimeout> } = {
+        obj,
+        t: 1,
+      }
+      dying.set(obj.id, state)
+      state.timer = setTimeout(() => {
+        if (dying.delete(obj.id)) requestDraw()
+      }, DIE_DURATION * 1000 + SETTLE_GRACE_MS)
+      gsap.to(state, {
+        t: 0,
+        duration: DIE_DURATION,
+        ease: DIE_EASE,
+        onUpdate: requestDraw,
+        onComplete: () => {
+          clearTimeout(state.timer)
+          dying.delete(obj.id)
+          requestDraw()
+        },
+      })
     }
 
     /**
@@ -1844,8 +2139,11 @@ export function BoardCanvas({
       // at the theme's ink, but a stroke drawn in one theme keeps its color when
       // you switch — recoloring it is the user's call, via the property panel.
       const ink = s.color
-      const t = s === drawing ? 0 : (settling.get(s.id)?.t ?? 1)
-      const { width, alpha } = settleStyle(t, s.width)
+      // Clamped: a shape's drop overshoots past 1, and a globalAlpha above 1 is not
+      // clamped by the canvas but IGNORED, leaving whatever alpha was set last.
+      const t = s === drawing ? 0 : Math.min(1, settling.get(s.id)?.t ?? 1)
+      const { width, alpha: settled } = settleStyle(t, s.width)
+      const alpha = settled * fade
       const b = brushOf(s.brush)
       // Multiplied into the settle rather than replacing it, so a pencil still lands
       // the same way a pen does — just fainter.
@@ -1958,7 +2256,8 @@ export function BoardCanvas({
     }
 
     function drawNote(n: Note) {
-      const { scale, alpha } = dropStyle(settling.get(n.id)?.t ?? 1)
+      const { scale, alpha: dropped } = dropStyle(settling.get(n.id)?.t ?? 1)
+      const alpha = dropped * fade
 
       ctx.save()
       ctx.globalAlpha = alpha
@@ -1979,7 +2278,17 @@ export function BoardCanvas({
         ctx.beginPath()
         ctx.roundRect(n.x, n.y, n.w, n.h, NOTE_RADIUS)
         ctx.fillStyle = n.color
-        ctx.fill()
+        // Shadow blur/offset ignore the transform, so they are in DEVICE px: scale by
+        // dpr for CSS px, and they stay constant under zoom. Fill-only, so the text and
+        // the edge stroke below cast nothing.
+        const dpr = window.devicePixelRatio || 1
+        for (const sh of hoverNote === n.id ? NOTE_SHADOW_HOVER : NOTE_SHADOW) {
+          ctx.shadowColor = `rgba(0,0,0,${sh.alpha})`
+          ctx.shadowBlur = sh.blur * dpr
+          ctx.shadowOffsetY = sh.y * dpr
+          ctx.fill()
+        }
+        ctx.shadowColor = "transparent"
       // The only theme-dependent thing about a note, and it isn't: a fixed translucent
       // black edge disappears against the dark board where the fill already separates
       // itself, and saves a pale note from bleeding into the light one.
@@ -2032,6 +2341,7 @@ export function BoardCanvas({
       frame = requestAnimationFrame(draw)
     }
     redrawRef.current = requestDraw
+    fadeOutRef.current = fadeOut
     syncEditorRef.current = syncEditor
 
     /**
@@ -2211,6 +2521,7 @@ export function BoardCanvas({
         if (o.locked) continue // pinned means pinned, including against a sweep
         if (!hitsSweep(o, from, to, r)) continue
         objects.splice(i, 1)
+        fadeOut(o) // same exit as Delete — the eraser removes objects, not just ink
         erased.push({ object: o, index: i })
         touch(o.id)
         if (selectedIdRef.current === o.id) setSelected(null)
@@ -2332,6 +2643,51 @@ export function BoardCanvas({
         e.button === 1 ||
         (e.button === 0 && spaceHeld)
 
+      /**
+       * The selected object's grips, in EVERY tool that draws them — see handlesLive.
+       *
+       * Above the tool branches rather than inside the Select one, because a grip that
+       * is on screen has to work wherever it is on screen. Handles also win over the
+       * object underneath them: they sit on and just outside the selection's edge, so
+       * picking first would make a corner grip unreachable.
+       */
+      if (!forcePan && e.button === 0 && handlesLive(toolRef.current)) {
+        const p = toWorld(e)
+        const sel = objects.find((o) => o.id === selectedIdRef.current)
+        if (sel && !sel.locked && !isLinked(sel)) {
+          // Before hitHandle: the north "+" and the rotate grip share the top-centre
+          // line, and the "+" is the one that has to win the overlap — see hitConnectSide.
+          const side = hitConnectSide(sel, p.x, p.y)
+          if (side) {
+            e.preventDefault()
+            connecting = { from: sel, side, end: p, target: null }
+            busyRef.current = true
+            capturePointer(e.pointerId)
+            requestDraw()
+            return
+          }
+
+          const handle = hitHandle(sel, p.x, p.y)
+          if (handle) {
+            e.preventDefault()
+            const c = centerOf(sel)
+            const hs = handlesFor(sel, 0)
+            transforming = {
+              object: sel,
+              handle,
+              geom: readGeom(sel),
+              anchor: handle === "rotate" ? { x: 0, y: 0 } : hs[OPPOSITE[handle]],
+              grabAngle: Math.atan2(p.y - c.y, p.x - c.x),
+              startAngle: sel.angle ?? 0,
+            }
+            hold.add(sel.id)
+            busyRef.current = true
+            capturePointer(e.pointerId)
+            return
+          }
+        }
+      }
+
       // Plain left button in Select mode: the hit test owns the gesture. An object
       // under the cursor takes it; empty canvas deselects and falls through to a pan.
       if (!forcePan && e.button === 0 && toolRef.current === "select") {
@@ -2366,42 +2722,6 @@ export function BoardCanvas({
           return
         }
 
-        // Handles win over the object underneath them: they sit on and just outside the
-        // selection's edge, so picking first would make a corner grip unreachable.
-        const sel = objects.find((o) => o.id === selectedIdRef.current)
-        if (sel && !sel.locked && !isLinked(sel)) {
-          // Before hitHandle: the north "+" and the rotate grip share the top-centre
-          // line, and the "+" is the one that has to win the overlap — see hitConnectSide.
-          const side = hitConnectSide(sel, p.x, p.y)
-          if (side) {
-            e.preventDefault()
-            connecting = { from: sel, side, end: p, target: null }
-            busyRef.current = true
-            capturePointer(e.pointerId)
-            requestDraw()
-            return
-          }
-
-          const handle = hitHandle(sel, p.x, p.y)
-          if (handle) {
-            e.preventDefault()
-            const c = centerOf(sel)
-            const hs = handlesFor(sel, 0)
-            transforming = {
-              object: sel,
-              handle,
-              geom: readGeom(sel),
-              anchor: handle === "rotate" ? { x: 0, y: 0 } : hs[OPPOSITE[handle]],
-              grabAngle: Math.atan2(p.y - c.y, p.x - c.x),
-              startAngle: sel.angle ?? 0,
-            }
-            hold.add(sel.id)
-            busyRef.current = true
-            capturePointer(e.pointerId)
-            return
-          }
-        }
-
         const hit = pickObject(objects, p.x, p.y, SELECT_SLOP / view.scale)
         setSelected(hit)
         // A locked object still selects — that is how you reach Unlock — but the drag
@@ -2414,6 +2734,7 @@ export function BoardCanvas({
           // no separate click-first step.
           e.preventDefault()
           dragging = hit
+          liftTo(hit.id, 1)
           hold.add(hit.id)
           dragLast = p
           dragStart = p
@@ -2599,6 +2920,12 @@ export function BoardCanvas({
       requestDraw()
     }
 
+    function onPointerLeave() {
+      if (hoverNote === null) return
+      hoverNote = null
+      requestDraw()
+    }
+
     function onPointerMove(e: PointerEvent) {
       // Before every mode branch: peers should see the cursor whatever tool is active,
       // including plain hovering, which returns early below. Time-throttled rather
@@ -2683,7 +3010,17 @@ export function BoardCanvas({
         requestDraw()
         return
       }
-      if (!drawing) return
+      if (!drawing) {
+        // Idle hover: only stickies lift. Hit-tested on move, repainted only on change.
+        const p = toWorld(e)
+        const hit = pickObject(objects, p.x, p.y, 0)
+        const id = hit?.type === "note" && !hit.bare ? hit.id : null
+        if (id !== hoverNote) {
+          hoverNote = id
+          requestDraw()
+        }
+        return
+      }
       if (e.shiftKey) shiftDrawn = true
 
       // Alt is read live off the event rather than latched like shiftDrawn: this is a
@@ -2797,7 +3134,7 @@ export function BoardCanvas({
         history.push({ kind: "add", object: arrow, index: objects.length - 1 })
         commit()
         setSelected(arrow)
-        animate(arrow.id, SETTLE_DURATION, SETTLE_EASE)
+        animate(arrow.id, DROP_DURATION, DROP_EASE)
         return
       }
 
@@ -2830,6 +3167,7 @@ export function BoardCanvas({
           commit()
         }
         hold.delete(dragging.id)
+        liftTo(dragging.id, 0)
         dragging = null
         // The gesture is over: drop the offset and take the guides off the screen.
         dragSnap = { x: 0, y: 0 }
@@ -2928,14 +3266,17 @@ export function BoardCanvas({
 
       // Recorded on release, never on pointerdown: an undo mid-gesture would otherwise
       // pop a stroke that is still being drawn into.
-      const { id } = drawing
+      const { id, shape } = drawing
       touch(drawing.id)
       history.push({ kind: "add", object: drawing, index: objects.indexOf(drawing) })
       commit()
       drawing = null
       releasePointer(e.pointerId)
 
-      animate(id, SETTLE_DURATION, SETTLE_EASE)
+      // A shape is an object being placed, so it gets the sticky's short spring; ink is
+      // a mark being made, and keeps the slower settle.
+      if (shape) animate(id, DROP_DURATION, DROP_EASE)
+      else animate(id, SETTLE_DURATION, SETTLE_EASE)
     }
 
     /**
@@ -2946,14 +3287,38 @@ export function BoardCanvas({
      * burns nothing. Only the curve and how drawStroke/drawNote read `t` differ.
      */
     function animate(id: string, duration: number, ease: string) {
-      const state = { t: 0 }
+      // No entry: `settling` never gets the id, and both draw paths already read a
+      // missing entry as t=1, so the object is simply there at full size.
+      if (reduceMotion()) return
+      const state: { t: number; timer?: ReturnType<typeof setTimeout> } = { t: 0 }
       settling.set(id, state)
+      /**
+       * A wall-clock backstop, because the entry animation must never be the reason an
+       * object cannot be SEEN.
+       *
+       * While an id is in `settling`, drawNote paints it at dropStyle(t) — at t=0 that
+       * is 60% opacity and 85% scale, which reads as "the sticky has no fill, just a
+       * selection outline". gsap advances t from requestAnimationFrame, and a tab that
+       * gets no frames (backgrounded, occluded, some minimised states) never advances
+       * it, so the tween neither progresses nor completes and the object stays faint
+       * indefinitely with nothing logged. Same failure class as the requestDraw latch
+       * above and the publish latch in useBoardSync — a frame that never runs.
+       *
+       * setTimeout keeps running where rAF does not, so this deletes the entry on time
+       * either way. When the tween does run it finishes first and clears this; when it
+       * does not, the object snaps to its settled state a moment late, which is the
+       * right failure — an animation that was skipped, not an object that vanished.
+       */
+      state.timer = setTimeout(() => {
+        if (settling.delete(id)) requestDraw()
+      }, duration * 1000 + SETTLE_GRACE_MS)
       gsap.to(state, {
         t: 1,
         duration,
         ease,
         onUpdate: requestDraw,
         onComplete: () => {
+          clearTimeout(state.timer)
           settling.delete(id)
           requestDraw()
         },
@@ -3048,6 +3413,7 @@ export function BoardCanvas({
     canvas.addEventListener("wheel", onWheel, { passive: false })
     canvas.addEventListener("pointerdown", onPointerDown)
     canvas.addEventListener("pointermove", onPointerMove)
+    canvas.addEventListener("pointerleave", onPointerLeave)
     canvas.addEventListener("pointerup", onPointerUp)
     canvas.addEventListener("pointercancel", onPointerUp)
     canvas.addEventListener("dblclick", onDoubleClick)
@@ -3081,10 +3447,15 @@ export function BoardCanvas({
     return () => {
       ro.disconnect()
       if (frame) cancelAnimationFrame(frame)
-      gsap.killTweensOf([...settling.values(), ...lasers.map((l) => l.a)])
+      gsap.killTweensOf([...settling.values(), ...dying.values(), sel, lift, ...lasers.map((l) => l.a)])
+      // killTweensOf does not run onComplete, so the backstops it leaves behind would
+      // fire against a torn-down canvas.
+      for (const s of settling.values()) clearTimeout(s.timer)
+      for (const d of dying.values()) clearTimeout(d.timer)
       canvas.removeEventListener("wheel", onWheel)
       canvas.removeEventListener("pointerdown", onPointerDown)
       canvas.removeEventListener("pointermove", onPointerMove)
+      canvas.removeEventListener("pointerleave", onPointerLeave)
       canvas.removeEventListener("pointerup", onPointerUp)
       canvas.removeEventListener("pointercancel", onPointerUp)
       canvas.removeEventListener("dblclick", onDoubleClick)
@@ -3133,8 +3504,10 @@ export function BoardCanvas({
           writes a file, the other only changes how you're looking at it — neither
           edits anything. Outside the chrome gate for that reason.
 
-          hideUI takes them too: "hide interface" that left two floating pills on screen
-          would not have hidden the interface. Ctrl+\ or Escape brings them back. */}
+          hideUI takes Export: "hide interface" that left a floating pill on screen would
+          not have hidden the interface. The zoom pill stays, collapsed to its eye — that
+          eye is the only on-screen way back, and hiding it would strand anyone who does
+          not already know Ctrl+\ or Escape. */}
       {/* A VIEWER, and a guest on a comment-tier link, get no editing chrome at all — so
           the header's Comments button is out of reach for them. This is the same control
           in the one place they can still see, alongside Export and Zoom, which they keep
@@ -3151,23 +3524,22 @@ export function BoardCanvas({
         </button>
       )}
       {!hideUI && (
-        <>
-          <ExportButton render={(scale, pad) => exportRef.current(scale, pad)} name={boardName} />
-          <BottomPill
-            viewRef={viewRef}
-            tool={tool}
-            onToolChange={changeTool}
-            canUndo={hist.canUndo}
-            canRedo={hist.canRedo}
-            onUndo={() => step("undo")}
-            onRedo={() => step("redo")}
-            onZoom={(dir) => zoomRef.current(dir)}
-            onZoomTo={(scale) => zoomToRef.current(scale)}
-            onZoomToFit={() => fitRef.current()}
-            onHideUI={() => setHideUI(true)}
-          />
-        </>
+        <ExportButton render={(scale, pad) => exportRef.current(scale, pad)} name={boardName} />
       )}
+      <BottomPill
+        viewRef={viewRef}
+        tool={tool}
+        onToolChange={changeTool}
+        canUndo={hist.canUndo}
+        canRedo={hist.canRedo}
+        onUndo={() => step("undo")}
+        onRedo={() => step("redo")}
+        onZoom={(dir) => zoomRef.current(dir)}
+        onZoomTo={(scale) => zoomToRef.current(scale)}
+        onZoomToFit={() => fitRef.current()}
+        hideUI={hideUI}
+        onHideUIChange={setHideUI}
+      />
       {/**
         * DIAGNOSTIC for the content-sync investigation. Two gates, both required.
         *
@@ -3196,6 +3568,11 @@ export function BoardCanvas({
           edge now that the tool rail has moved off it. */}
       <div className="elevation-2 fixed inset-x-0 top-0 flex h-14 items-center justify-between gap-3 border-x-0 border-t-0 border-b border-b-outline-variant px-3">
         <div className="flex min-w-0 items-center gap-1">
+          {/* The way out. A board is the one place with no sidebar, so without this the
+              logo — the control every app trains you to treat as "home" — is simply not
+              on screen. Glyph only: the board's own name is the identity that matters in
+              this bar, and the product just needs to be clickable. */}
+          <Logo variant="dark" wordmark={false} href="/dashboard" className="mr-1 shrink-0" />
           <BoardTitle boardId={boardId} initialName={boardName} startRef={renameRef} />
           <BoardMenu
             boardId={boardId}
@@ -3420,8 +3797,10 @@ export function BoardCanvas({
           a workspace VIEWER and a signed-in guest on a comment-tier link both get it. The
           routes decide what each of them may actually do — the panel only renders what it
           is told it is allowed to. */}
+      <AnimatePresence>
       {commentsOpen && !hideUI && (
         <CommentsPanel
+          key="comments"
           boardId={boardId}
           shareToken={initialShareToken}
           onClose={() => setCommentsOpen(false)}
@@ -3435,6 +3814,7 @@ export function BoardCanvas({
           version={commentsVersion}
         />
       )}
+      </AnimatePresence>
     </>
   )
 }
