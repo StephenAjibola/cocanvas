@@ -9,7 +9,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test \"src/**/*.test.ts\" \"realtime/*.test.js\""
+    "test": "node --test \"src/**/*.test.ts\" \"realtime/*.test.js\"",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
@@ -41,17 +42,12 @@
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "allowScripts": {
+    "prisma": true,
+    "@prisma/engines": true,
+    "core-js": true,
+    "sharp": true,
+    "unrs-resolver": true
   }
-}
-"scripts": {
-  "dev": "next dev",
-  "build": "next build",
-  "postinstall": "prisma generate"
-}
-"allowScripts": {
-  "prisma": true,
-  "@prisma/engines": true,
-  "core-js": true,
-  "sharp": true,
-  "unrs-resolver": true
 }
